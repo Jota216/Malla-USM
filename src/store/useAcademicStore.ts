@@ -8,14 +8,18 @@ import {
   CourseStatusDetail,
   AcademicStatistics,
   CourseSolveResult,
+  SubFormulaCourseSolveResult,
 } from '@/types/academic';
 import ici2014Data from '@/data/ici-2014.json';
 import {
   createDefaultCourseConfig,
   DEFAULT_GRADUATION_MILESTONES,
+  createInf292ExampleScenario,
+  ensureFormulaConfig,
 } from '@/data/defaultTemplates';
 import { calculateCurriculumGraph } from '@/engine/graphUnlock';
 import { solveCourseStatus } from '@/engine/gradeSolver';
+import { solveSubFormulaCourse } from '@/engine/subFormulaSolver';
 import { sigaService } from '@/services/sigaService';
 
 export interface AcademicStoreState {
@@ -34,9 +38,16 @@ export interface AcademicStoreState {
   setCourseGrade: (sigla: string, grade: number) => void;
   enrollCourse: (sigla: string) => void;
   unenrollCourse: (sigla: string) => void;
+  loadInf292Example: () => void;
   setEvaluationScore: (
     sigla: string,
     groupId: string,
+    evalId: string,
+    score: number | null
+  ) => void;
+  setSubFormulaEvaluationScore: (
+    sigla: string,
+    blockId: string,
     evalId: string,
     score: number | null
   ) => void;
@@ -55,6 +66,7 @@ export interface AcademicStoreState {
   getCoursesStatus: () => Record<string, CourseStatusDetail>;
   getStatistics: () => AcademicStatistics;
   getCourseSolveResult: (sigla: string) => CourseSolveResult | null;
+  getSubFormulaSolveResult: (sigla: string) => SubFormulaCourseSolveResult | null;
 }
 
 const getSafeStorage = () => {
@@ -161,6 +173,21 @@ export const useAcademicStore = create<AcademicStoreState>()(
         }
       },
 
+      loadInf292Example: () => {
+        const norm = 'INF-292';
+        const currentInProgress = { ...get().inProgressCourses };
+        const currentApproved = { ...get().approvedCourses };
+
+        delete currentApproved[norm];
+        currentInProgress[norm] = createInf292ExampleScenario();
+
+        set({
+          inProgressCourses: currentInProgress,
+          approvedCourses: currentApproved,
+          selectedCourseSigla: norm,
+        });
+      },
+
       setEvaluationScore: (
         sigla: string,
         groupId: string,
@@ -171,6 +198,8 @@ export const useAcademicStore = create<AcademicStoreState>()(
         const course = get().inProgressCourses[norm];
         if (!course) return;
 
+        const parsedScore = score !== null && !isNaN(score) ? Number(score) : null;
+
         const updatedGroups = course.groups.map((group) => {
           if (group.id !== groupId) return group;
           return {
@@ -179,8 +208,87 @@ export const useAcademicStore = create<AcademicStoreState>()(
               if (ev.id !== evalId) return ev;
               return {
                 ...ev,
-                score: score !== null && !isNaN(score) ? Number(score) : null,
+                score: parsedScore,
               };
+            }),
+          };
+        });
+
+        let updatedFormula = course.formulaConfig;
+        if (course.formulaConfig) {
+          updatedFormula = {
+            ...course.formulaConfig,
+            subFormulas: course.formulaConfig.subFormulas.map((b) => {
+              if (b.id !== groupId && b.code.toLowerCase() !== groupId.toLowerCase()) {
+                return b;
+              }
+              return {
+                ...b,
+                evaluations: b.evaluations.map((ev) => {
+                  if (ev.id !== evalId) return ev;
+                  return { ...ev, score: parsedScore };
+                }),
+              };
+            }),
+          };
+        }
+
+        set({
+          inProgressCourses: {
+            ...get().inProgressCourses,
+            [norm]: {
+              ...course,
+              groups: updatedGroups,
+              formulaConfig: updatedFormula,
+            },
+          },
+        });
+      },
+
+      setSubFormulaEvaluationScore: (
+        sigla: string,
+        blockId: string,
+        evalId: string,
+        score: number | null
+      ) => {
+        const norm = sigla.trim().toUpperCase();
+        const baseCourse = get().inProgressCourses[norm];
+        if (!baseCourse) return;
+
+        const course = baseCourse.formulaConfig
+          ? baseCourse
+          : { ...baseCourse, formulaConfig: ensureFormulaConfig(baseCourse) };
+
+        const parsedScore = score !== null && !isNaN(score) ? Number(score) : null;
+
+        let updatedFormula = course.formulaConfig;
+        if (updatedFormula) {
+          updatedFormula = {
+            ...updatedFormula,
+            subFormulas: updatedFormula.subFormulas.map((b) => {
+              if (b.id !== blockId && b.code.toLowerCase() !== blockId.toLowerCase()) {
+                return b;
+              }
+              return {
+                ...b,
+                evaluations: b.evaluations.map((ev) => {
+                  if (ev.id !== evalId) return ev;
+                  return { ...ev, score: parsedScore };
+                }),
+              };
+            }),
+          };
+        }
+
+        const updatedGroups = (course.groups || []).map((group) => {
+          if (group.id !== blockId && group.id.toLowerCase() !== blockId.toLowerCase()) {
+            return group;
+          }
+          return {
+            ...group,
+            evaluations: group.evaluations.map((ev) => {
+              if (ev.id !== evalId) return ev;
+              return { ...ev, score: parsedScore };
             }),
           };
         });
@@ -191,6 +299,7 @@ export const useAcademicStore = create<AcademicStoreState>()(
             [norm]: {
               ...course,
               groups: updatedGroups,
+              formulaConfig: updatedFormula,
             },
           },
         });
@@ -356,6 +465,17 @@ export const useAcademicStore = create<AcademicStoreState>()(
         const config = get().inProgressCourses[norm];
         if (!config) return null;
         return solveCourseStatus(config, get().curriculum.escala_notas.aprobacion);
+      },
+
+      getSubFormulaSolveResult: (sigla: string): SubFormulaCourseSolveResult | null => {
+        const norm = sigla.trim().toUpperCase();
+        const config = get().inProgressCourses[norm];
+        if (!config) return null;
+        const formulaConfig = ensureFormulaConfig(config);
+        return solveSubFormulaCourse(
+          formulaConfig,
+          get().curriculum.escala_notas.aprobacion
+        );
       },
     }),
     {

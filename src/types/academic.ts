@@ -63,9 +63,80 @@ export interface EvaluationGroup {
   evaluations: Evaluation[];
 }
 
+export type SubFormulaType = 'simple_average' | 'drop_worst' | 'weighted';
+
+export interface SubFormulaEvaluation {
+  id: string;
+  name: string;
+  weight: number;
+  score: number | null;
+}
+
+export interface SubFormulaBlock {
+  id: string;
+  name: string;
+  code: string;
+  type: SubFormulaType;
+  prefix: string;
+  count: number;
+  dropWorstCount: number;
+  minGradeRequired: number | null;
+  weightInFinal: number; // e.g. 0.10, 0.45 or 10, 45
+  evaluations: SubFormulaEvaluation[];
+}
+
+export interface CourseFinalFormula {
+  expression: string;
+  passingGrade: number; // default 55
+  applyPenaltyRule: boolean; // IF all blocks with minGrade >= minGrade THEN NF = formula ELSE NF = min(block averages)
+  subFormulas: SubFormulaBlock[];
+}
+
 export interface EnrolledCourseConfig {
   sigla: string;
   groups: EvaluationGroup[];
+  formulaConfig?: CourseFinalFormula;
+}
+
+export type SubFormulaSolverStatus =
+  | 'APPROVED'
+  | 'ON_TRACK'
+  | 'IN_DANGER'
+  | 'REQUIRES_PERFECT'
+  | 'FAILED';
+
+export interface SubFormulaBlockSolveResult {
+  blockId: string;
+  blockCode: string;
+  blockName: string;
+  type: SubFormulaType;
+  weightInFinal: number; // normalized (0 to 1)
+  minGradeRequired: number | null;
+  currentAverage: number | null;
+  projectedAverageWithZero: number;
+  requiredForBlockMin: number | null;
+  meetsMinGrade: boolean;
+  isMinGradeCritical: boolean;
+  knownCount: number;
+  unknownCount: number;
+  droppedScores?: number[];
+}
+
+export interface SubFormulaCourseSolveResult {
+  sigla?: string;
+  status: SubFormulaSolverStatus;
+  currentFinalGrade: number;
+  formulaFinalGrade: number;
+  penaltyRuleApplies: boolean;
+  isPenaltyTriggered: boolean;
+  penaltyGrade: number | null;
+  requiredUniformGrade: number | null;
+  requiredGlobalGrade: number | null;
+  bindingCondition: 'GLOBAL' | 'BLOCK_MIN' | 'NONE';
+  bindingBlockCode?: string;
+  bindingBlockName?: string;
+  blocks: SubFormulaBlockSolveResult[];
+  diagnosticMessage: string;
 }
 
 export type SolverStatus = 

@@ -1,4 +1,23 @@
-import { EvaluationGroup, EnrolledCourseConfig, GraduationMilestone } from '@/types/academic';
+import {
+  EvaluationGroup,
+  EnrolledCourseConfig,
+  GraduationMilestone,
+  CourseFinalFormula,
+  SubFormulaBlock,
+} from '@/types/academic';
+import {
+  createInf292CourseConfig,
+  createInf292FormulaConfig,
+  createInf292EvaluationGroups,
+  createInf292ExampleScenario,
+} from './inf292Template';
+
+export {
+  createInf292CourseConfig,
+  createInf292FormulaConfig,
+  createInf292EvaluationGroups,
+  createInf292ExampleScenario,
+};
 
 /**
  * Standard USM Syllabus Template (Section 8 of CONTEXTO.md)
@@ -34,12 +53,117 @@ export const createDefaultEvaluationGroups = (): EvaluationGroup[] => [
 ];
 
 /**
- * Create default enrolled course configuration
+ * Creates the standard CourseFinalFormula for USM courses (70% PC, 30% PT).
  */
-export const createDefaultCourseConfig = (sigla: string): EnrolledCourseConfig => ({
-  sigla,
-  groups: createDefaultEvaluationGroups(),
+export const createDefaultFormulaConfig = (): CourseFinalFormula => ({
+  expression: '0.70 * PC + 0.30 * PT',
+  passingGrade: 55,
+  applyPenaltyRule: true,
+  subFormulas: [
+    {
+      id: 'certamenes',
+      name: 'Certámenes',
+      code: 'PC',
+      type: 'simple_average',
+      prefix: 'C',
+      count: 3,
+      dropWorstCount: 0,
+      minGradeRequired: 50,
+      weightInFinal: 0.7,
+      evaluations: [
+        { id: 'c1', name: 'Certamen 1', weight: 1, score: null },
+        { id: 'c2', name: 'Certamen 2', weight: 1, score: null },
+        { id: 'c3', name: 'Certamen 3', weight: 1, score: null },
+      ],
+    },
+    {
+      id: 'tareas',
+      name: 'Controles / Tareas',
+      code: 'PT',
+      type: 'simple_average',
+      prefix: 'T',
+      count: 2,
+      dropWorstCount: 0,
+      minGradeRequired: null,
+      weightInFinal: 0.3,
+      evaluations: [
+        { id: 't1', name: 'Tarea 1', weight: 1, score: null },
+        { id: 't2', name: 'Tarea 2', weight: 1, score: null },
+      ],
+    },
+  ],
 });
+
+/**
+ * Guarantees that an enrolled course has a valid CourseFinalFormula.
+ * If config.formulaConfig exists, returns it; otherwise synthesizes one from groups or default.
+ */
+export function ensureFormulaConfig(config: EnrolledCourseConfig): CourseFinalFormula {
+  if (config.formulaConfig && config.formulaConfig.subFormulas && config.formulaConfig.subFormulas.length > 0) {
+    return config.formulaConfig;
+  }
+
+  const norm = config.sigla.trim().toUpperCase();
+  if (norm === 'INF-292') {
+    return createInf292FormulaConfig();
+  }
+
+  if (config.groups && config.groups.length > 0) {
+    const subFormulas: SubFormulaBlock[] = config.groups.map((g, idx) => {
+      const isCertamen =
+        g.name.toLowerCase().includes('certam') || g.id.toLowerCase().includes('certam');
+      const code = isCertamen ? 'PC' : `P${idx + 1}`;
+      const prefix = isCertamen ? 'C' : `T`;
+      return {
+        id: g.id,
+        name: g.name,
+        code,
+        type: 'simple_average',
+        prefix,
+        count: g.evaluations.length,
+        dropWorstCount: 0,
+        minGradeRequired: g.minGrade ?? null,
+        weightInFinal: g.weight > 1 ? g.weight / 100 : g.weight,
+        evaluations: g.evaluations.map((e) => ({
+          id: e.id,
+          name: e.name,
+          weight: 1,
+          score: e.score,
+        })),
+      };
+    });
+
+    const expression = subFormulas
+      .map((b) => `${b.weightInFinal.toFixed(2)} * ${b.code}`)
+      .join(' + ');
+
+    return {
+      expression,
+      passingGrade: 55,
+      applyPenaltyRule: subFormulas.some((b) => b.minGradeRequired !== null),
+      subFormulas,
+    };
+  }
+
+  return createDefaultFormulaConfig();
+}
+
+/**
+ * Create default enrolled course configuration.
+ * Automatically recognizes specialized course formulas like INF-292.
+ */
+export const createDefaultCourseConfig = (sigla: string): EnrolledCourseConfig => {
+  const norm = sigla.trim().toUpperCase();
+  if (norm === 'INF-292') {
+    return createInf292CourseConfig();
+  }
+
+  return {
+    sigla: norm,
+    groups: createDefaultEvaluationGroups(),
+    formulaConfig: createDefaultFormulaConfig(),
+  };
+};
 
 /**
  * Default Graduation Milestones for USM Engineering (Civil Informática)

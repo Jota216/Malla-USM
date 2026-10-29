@@ -1,16 +1,13 @@
 import * as React from "react";
 import { useAcademicStore } from "@/store/useAcademicStore";
-import { FormulaBuilder } from "./FormulaBuilder";
-import { SolverOutput } from "./SolverOutput";
+import { ensureFormulaConfig } from "@/data/defaultTemplates";
+import { CourseSolverCard } from "./CourseSolverCard";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Command,
   CommandInput,
@@ -19,373 +16,292 @@ import {
   CommandGroup,
   CommandItem,
 } from "@/components/ui/command";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Plus,
-  BookOpen,
-  Calculator,
-  Trash2,
   Sparkles,
-  Search,
-  Sliders,
-  Scale,
-  Award,
+  Calculator,
+  BookOpen,
+  Layers,
 } from "lucide-react";
 
 export function SemesterSolver() {
   const {
     curriculum,
     inProgressCourses,
-    selectedCourseSigla,
-    setSelectedCourse,
     enrollCourse,
     unenrollCourse,
+    loadInf292Example,
+    setSubFormulaEvaluationScore,
     toggleCourseApproval,
-    getCourseSolveResult,
-    getCoursesStatus,
+    getSubFormulaSolveResult,
   } = useAcademicStore();
 
-  const [enrollModalOpen, setEnrollModalOpen] = React.useState(false);
-  const [activeTab, setActiveTab] = React.useState<"solver" | "formula">("solver");
+  const [openCombobox, setOpenCombobox] = React.useState(false);
 
   const enrolledSiglas = Object.keys(inProgressCourses);
-  const coursesStatus = getCoursesStatus();
 
-  // If no course is selected but there are enrolled courses, pick the first one
-  React.useEffect(() => {
-    if (
-      (!selectedCourseSigla || !inProgressCourses[selectedCourseSigla]) &&
-      enrolledSiglas.length > 0
-    ) {
-      setSelectedCourse(enrolledSiglas[0]);
-    }
-  }, [enrolledSiglas, selectedCourseSigla, setSelectedCourse, inProgressCourses]);
-
-  const currentCourseConfig = selectedCourseSigla
-    ? inProgressCourses[selectedCourseSigla]
-    : null;
-
-  const currentCourseInfo = React.useMemo(() => {
-    if (!selectedCourseSigla) return null;
-    return (
-      curriculum.ramos.find(
-        (r) => r.sigla.toUpperCase() === selectedCourseSigla.toUpperCase()
-      ) || null
-    );
-  }, [curriculum.ramos, selectedCourseSigla]);
-
-  const solveResult = currentCourseConfig
-    ? getCourseSolveResult(currentCourseConfig.sigla)
-    : null;
-
-  // Unenrolled courses available in the curriculum
+  // Available courses from the curriculum not currently enrolled
   const availableToEnroll = React.useMemo(() => {
     return curriculum.ramos.filter(
       (r) => !inProgressCourses[r.sigla.toUpperCase()]
     );
   }, [curriculum.ramos, inProgressCourses]);
 
-  const handleEnrollCourse = (sigla: string) => {
-    enrollCourse(sigla);
-    setSelectedCourse(sigla);
-    setEnrollModalOpen(false);
-  };
-
-  const handleEnrollRecommended = () => {
-    // Enroll the first 4 available courses
-    const candidates = curriculum.ramos
-      .filter((r) => {
-        const s = coursesStatus[r.sigla]?.status;
-        return s === "AVAILABLE" && !inProgressCourses[r.sigla.toUpperCase()];
-      })
-      .slice(0, 4);
-
-    if (candidates.length > 0) {
-      candidates.forEach((c) => enrollCourse(c.sigla));
-      setSelectedCourse(candidates[0].sigla);
-    } else {
-      // Fallback: enroll Semester 1 courses
-      const sem1 = curriculum.ramos.filter((r) => r.semestre === 1).slice(0, 4);
-      sem1.forEach((c) => enrollCourse(c.sigla));
-      setSelectedCourse(sem1[0].sigla);
+  // Aggregate semester metrics
+  const semesterMetrics = React.useMemo(() => {
+    let sct = 0;
+    let usm = 0;
+    for (const sigla of enrolledSiglas) {
+      const course = curriculum.ramos.find(
+        (r) => r.sigla.toUpperCase() === sigla.toUpperCase()
+      );
+      if (course) {
+        sct += course.creditos_sct || 0;
+        usm += course.creditos_usm || 0;
+      }
     }
+    return { sct, usm };
+  }, [curriculum.ramos, enrolledSiglas]);
+
+  const handleEnroll = (sigla: string) => {
+    enrollCourse(sigla);
+    setOpenCombobox(false);
   };
 
   return (
-    <div className="space-y-4">
-      {/* Main Grid: Sidebar List + Solver Central */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* Left Column: Enrolled Courses List */}
-        <div className="lg:col-span-4 xl:col-span-3 space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="font-extrabold text-sm text-foreground flex items-center gap-1.5">
-              <BookOpen className="h-4 w-4 text-secondary" />
-              <span>Ramos Semestre Actual</span>
-            </h3>
-            <Badge variant="outline" className="text-xs">
-              {enrolledSiglas.length} inscritos
-            </Badge>
-          </div>
-
-          {/* Enroll Course Button */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setEnrollModalOpen(true)}
-            className="w-full text-xs font-semibold gap-1.5 h-9 border-dashed border-primary/50 hover:border-primary hover:bg-primary/5"
-          >
-            <Plus className="h-4 w-4 text-primary" />
-            + Inscribir Asignatura
-          </Button>
-
-          {/* Empty State */}
-          {enrolledSiglas.length === 0 ? (
-            <div className="rounded-xl border border-dashed p-6 text-center space-y-3 bg-muted/20">
-              <Calculator className="h-10 w-10 text-muted-foreground/50 mx-auto" />
-              <div>
-                <h4 className="font-bold text-sm text-foreground">
-                  Sin asignaturas en curso
-                </h4>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Inscribe asignaturas para calcular tus notas requeridas con precisión USM.
-                </p>
-              </div>
+    <div className="space-y-6">
+      {/* Top Bar: Selector + Cargar Ejemplo INF-292 + Metrics */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-xl border border-zinc-800 bg-zinc-900/90 shadow-md">
+        {/* Left: Enrollment Selector + Example Button */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Quick Course Enrollment Combobox */}
+          <Popover open={openCombobox} onOpenChange={setOpenCombobox}>
+            <PopoverTrigger asChild>
               <Button
-                variant="usm"
+                variant="outline"
                 size="sm"
-                onClick={handleEnrollRecommended}
-                className="text-xs gap-1.5"
+                className="h-9 px-3 text-xs font-semibold gap-1.5 border-zinc-700 bg-zinc-950/80 text-zinc-100 hover:bg-zinc-800 hover:border-zinc-600 transition-colors"
+                aria-label="Inscribir asignatura al semestre"
               >
-                <Sparkles className="h-3.5 w-3.5 text-secondary" />
-                Inscribir Ramos Recomendados
+                <Plus className="h-4 w-4 text-amber-400" />
+                <span>Inscribir Asignatura</span>
               </Button>
-            </div>
-          ) : (
-            /* Courses List */
-            <div className="space-y-2 max-h-[650px] overflow-y-auto pr-0.5">
-              {enrolledSiglas.map((sigla) => {
-                const res = getCourseSolveResult(sigla);
-                const info = curriculum.ramos.find(
-                  (r) => r.sigla.toUpperCase() === sigla.toUpperCase()
-                );
-                const isSelected = selectedCourseSigla?.toUpperCase() === sigla.toUpperCase();
+            </PopoverTrigger>
+            <PopoverContent
+              className="w-80 sm:w-96 p-0 border-zinc-800 bg-zinc-900 shadow-2xl"
+              align="start"
+            >
+              <Command className="bg-transparent text-zinc-100">
+                <CommandInput
+                  placeholder="Buscar por código o nombre (ej. INF-292, MAT-022)..."
+                  className="text-xs"
+                />
+                <CommandList className="max-h-64 overflow-y-auto">
+                  <CommandEmpty className="py-4 text-center text-xs text-zinc-400">
+                    No se encontraron asignaturas disponibles.
+                  </CommandEmpty>
+                  <CommandGroup heading="Asignaturas Disponibles de la Malla">
+                    {availableToEnroll.map((course) => (
+                      <CommandItem
+                        key={course.sigla}
+                        value={`${course.sigla} ${course.nombre}`}
+                        onSelect={() => handleEnroll(course.sigla)}
+                        className="flex items-center justify-between p-2.5 text-xs text-zinc-200 hover:bg-zinc-800/80 cursor-pointer rounded-md transition-colors"
+                      >
+                        <div className="space-y-0.5">
+                          <div className="font-mono font-bold text-zinc-100">
+                            {course.sigla} •{" "}
+                            <span className="font-sans font-medium text-zinc-300">
+                              {course.nombre}
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-zinc-400">
+                            Semestre {course.semestre} • {course.creditos_usm} USM | {course.creditos_sct} SCT
+                          </div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-2 text-[10px] font-semibold text-amber-400 hover:text-amber-300 hover:bg-amber-950/40"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleEnroll(course.sigla);
+                          }}
+                        >
+                          + Inscribir
+                        </Button>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
 
-                let statusBadge = (
-                  <Badge variant="outline" className="text-[10px]">
-                    En curso
-                  </Badge>
-                );
-                if (res) {
-                  if (res.status === "APPROVED") {
-                    statusBadge = (
-                      <Badge variant="success" className="text-[10px]">
-                        Aprobado
-                      </Badge>
-                    );
-                  } else if (res.status === "IN_DANGER") {
-                    statusBadge = (
-                      <Badge variant="warning" className="text-[10px]">
-                        En Peligro
-                      </Badge>
-                    );
-                  } else if (res.status === "REQUIRES_RECOVERY") {
-                    statusBadge = (
-                      <Badge variant="destructive" className="text-[10px]">
-                        Recuperativo
-                      </Badge>
-                    );
-                  } else if (res.status === "FAILED") {
-                    statusBadge = (
-                      <Badge variant="destructive" className="text-[10px]">
-                        Reprobado
-                      </Badge>
-                    );
-                  } else if (res.effectiveRequiredGrade !== null) {
-                    statusBadge = (
-                      <Badge variant="secondary" className="text-[10px] bg-sky-500/20 text-sky-800 dark:text-sky-300 font-bold">
-                        Req {Math.round(res.effectiveRequiredGrade)}
-                      </Badge>
-                    );
-                  }
-                }
-
-                return (
-                  <div
-                    key={sigla}
-                    onClick={() => setSelectedCourse(sigla)}
-                    className={`p-3 rounded-lg border text-xs cursor-pointer transition-all select-none ${
-                      isSelected
-                        ? "border-[#002B49] bg-[#002B49]/10 dark:border-[#D99B00] dark:bg-[#D99B00]/10 shadow-xs font-semibold ring-1 ring-[#002B49]/30"
-                        : "bg-card hover:bg-muted/50 border-border"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-1 mb-1">
-                      <span className="font-mono font-bold tracking-tight text-foreground">
-                        {sigla}
-                      </span>
-                      {statusBadge}
-                    </div>
-
-                    <div className="text-[11px] text-muted-foreground line-clamp-1">
-                      {info?.nombre || sigla}
-                    </div>
-
-                    {res && (
-                      <div className="flex items-center justify-between text-[10px] text-muted-foreground mt-2 pt-1 border-t border-border/50">
-                        <span>Puntos: {res.accumulatedPoints.toFixed(1)} / 55</span>
-                        <span>{Math.round(res.remainingWeight * 100)}% libre</span>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
+          {/* Quick Action Button: Cargar Ejemplo INF-292 */}
+          <Button
+            size="sm"
+            onClick={loadInf292Example}
+            className="h-9 px-3.5 text-xs font-bold gap-1.5 bg-gradient-to-r from-[#002B49] to-[#003d69] hover:from-[#003459] hover:to-[#004d85] text-amber-400 border border-amber-500/30 shadow-sm transition-all hover:border-amber-400/50"
+            title="Cargar escenario algebraico con sub-fórmulas para INF-292 (Optimización)"
+          >
+            <Sparkles className="h-4 w-4 text-amber-400 shrink-0" />
+            <span>Cargar Ejemplo INF-292</span>
+          </Button>
         </div>
 
-        {/* Right / Center Column: Course Solver Details */}
-        <div className="lg:col-span-8 xl:col-span-9 space-y-4">
-          {currentCourseConfig && solveResult ? (
-            <>
-              {/* Selected Course Header Banner */}
-              <div className="rounded-xl border bg-card/80 p-4 shadow-xs flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-muted">
-                      {currentCourseConfig.sigla}
-                    </span>
-                    {currentCourseInfo && (
-                      <span className="text-xs text-muted-foreground font-medium">
-                        Semestre {currentCourseInfo.semestre} •{" "}
-                        {currentCourseInfo.creditos_usm} USM |{" "}
-                        {currentCourseInfo.creditos_sct} SCT
-                      </span>
-                    )}
-                  </div>
-                  <h2 className="text-lg sm:text-xl font-black text-foreground mt-1">
-                    {currentCourseInfo?.nombre || currentCourseConfig.sigla}
-                  </h2>
-                </div>
+        {/* Right: Inline Semester Metrics */}
+        <div className="flex items-center gap-3 text-xs text-zinc-300 font-medium">
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-zinc-950/70 border border-zinc-800">
+            <BookOpen className="h-3.5 w-3.5 text-amber-400" />
+            <span>
+              <strong className="text-zinc-100 font-mono">
+                {enrolledSiglas.length}
+              </strong>{" "}
+              {enrolledSiglas.length === 1 ? "ramo inscrito" : "ramos inscritos"}
+            </span>
+          </div>
 
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      toggleCourseApproval(currentCourseConfig.sigla, solveResult.finalGrade);
-                    }}
-                    className="text-xs gap-1.5"
-                    title="Aprobar y transferir nota final a la malla"
-                  >
-                    <Award className="h-4 w-4 text-emerald-600" />
-                    Aprobar Ramo ({solveResult.finalGrade})
-                  </Button>
-
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => unenrollCourse(currentCourseConfig.sigla)}
-                    className="text-xs gap-1 text-muted-foreground hover:text-destructive"
-                    title="Desinscribir del semestre actual"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    Desinscribir
-                  </Button>
-                </div>
-              </div>
-
-              {/* View Switcher Tabs: Solver Output vs Formula Builder */}
-              <Tabs
-                value={activeTab}
-                onValueChange={(v) => setActiveTab(v as "solver" | "formula")}
-                className="w-full"
-              >
-                <TabsList className="grid w-full max-w-md grid-cols-2 mb-2">
-                  <TabsTrigger value="solver" className="gap-1.5 text-xs">
-                    <Scale className="h-3.5 w-3.5" />
-                    Diagnóstico &amp; Despeje
-                  </TabsTrigger>
-                  <TabsTrigger value="formula" className="gap-1.5 text-xs">
-                    <Sliders className="h-3.5 w-3.5" />
-                    Editar Ponderaciones
-                  </TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="solver">
-                  <SolverOutput
-                    solveResult={solveResult}
-                    courseConfig={currentCourseConfig}
-                  />
-                </TabsContent>
-
-                <TabsContent value="formula">
-                  <FormulaBuilder courseConfig={currentCourseConfig} />
-                </TabsContent>
-              </Tabs>
-            </>
-          ) : (
-            <div className="rounded-xl border bg-card p-12 text-center text-muted-foreground">
-              <Calculator className="h-12 w-12 mx-auto text-muted-foreground/40 mb-3" />
-              <h3 className="font-bold text-base text-foreground">
-                Selecciona una asignatura de la lista
-              </h3>
-              <p className="text-xs max-w-sm mx-auto mt-1">
-                Haz clic en una de tus asignaturas inscritas a la izquierda o inscribe un nuevo ramo para comenzar los cálculos.
-              </p>
-            </div>
-          )}
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-zinc-950/70 border border-zinc-800">
+            <Layers className="h-3.5 w-3.5 text-blue-400" />
+            <span>
+              Créditos:{" "}
+              <strong className="text-zinc-100 font-mono">
+                {semesterMetrics.sct}
+              </strong>{" "}
+              SCT{" "}
+              <span className="text-zinc-500 font-normal">
+                ({semesterMetrics.usm} USM)
+              </span>
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* Enroll Course Dialog with Command Search */}
-      <Dialog open={enrollModalOpen} onOpenChange={setEnrollModalOpen}>
-        <DialogContent className="sm:max-w-md p-0 overflow-hidden">
-          <DialogHeader className="p-4 pb-2">
-            <DialogTitle className="text-sm font-bold flex items-center gap-2">
-              <Search className="h-4 w-4 text-secondary" />
-              Inscribir Asignatura al Semestre
-            </DialogTitle>
-            <DialogDescription className="text-xs">
-              Busca por código o nombre para agregar una asignatura a tu solucionador de notas.
-            </DialogDescription>
-          </DialogHeader>
+      {/* Main Content: Course Cards Stack or Empty State */}
+      {enrolledSiglas.length === 0 ? (
+        /* Empty State */
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-8 sm:p-14 text-center max-w-2xl mx-auto space-y-6 shadow-xl backdrop-blur">
+          <div className="h-16 w-16 rounded-2xl bg-zinc-800/80 border border-zinc-700/60 flex items-center justify-center mx-auto shadow-inner">
+            <Calculator className="h-8 w-8 text-amber-400" />
+          </div>
 
-          <Command className="border-t">
-            <CommandInput placeholder="Buscar por código o nombre (ej. MAT-022, FIS-110)..." />
-            <CommandList className="max-h-72">
-              <CommandEmpty className="text-xs py-4 text-center text-muted-foreground">
-                No se encontraron asignaturas disponibles.
-              </CommandEmpty>
-              <CommandGroup heading="Asignaturas Disponibles de la Malla">
-                {availableToEnroll.map((course) => (
-                  <CommandItem
-                    key={course.sigla}
-                    onSelect={() => handleEnrollCourse(course.sigla)}
-                    className="flex items-center justify-between p-2 text-xs cursor-pointer"
-                  >
-                    <div>
-                      <div className="font-bold text-foreground">
-                        {course.sigla} • {course.nombre}
-                      </div>
-                      <div className="text-[10px] text-muted-foreground">
-                        Semestre {course.semestre} • {course.creditos_usm} USM | {course.creditos_sct} SCT
-                      </div>
-                    </div>
-                    <Button
-                      variant="usm"
-                      size="sm"
-                      className="h-6 px-2 text-[10px]"
-                      onClick={() => handleEnrollCourse(course.sigla)}
-                    >
-                      Inscribir
-                    </Button>
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-            </CommandList>
-          </Command>
-        </DialogContent>
-      </Dialog>
+          <div className="space-y-2 max-w-md mx-auto">
+            <h3 className="text-lg sm:text-xl font-black text-zinc-100 tracking-tight">
+              Sin asignaturas inscritas este semestre
+            </h3>
+            <p className="text-xs sm:text-sm text-zinc-400 leading-relaxed">
+              Inscribe ramos de la malla para calcular automáticamente qué notas necesitas para aprobar o carga el modelo completo de <strong>INF-292 (Optimización)</strong>.
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+            <Button
+              size="default"
+              onClick={loadInf292Example}
+              className="w-full sm:w-auto h-10 px-5 text-xs font-bold gap-2 bg-gradient-to-r from-[#002B49] to-[#003d69] hover:from-[#003459] hover:to-[#004d85] text-amber-400 border border-amber-500/40 shadow-md"
+            >
+              <Sparkles className="h-4 w-4 text-amber-400" />
+              Cargar Ejemplo INF-292 (Optimización)
+            </Button>
+
+            <Popover open={openCombobox} onOpenChange={setOpenCombobox}>
+              <PopoverTrigger asChild>
+                <Button
+                  size="default"
+                  variant="outline"
+                  className="w-full sm:w-auto h-10 px-5 text-xs font-semibold gap-2 border-zinc-700 bg-zinc-800 text-zinc-200 hover:bg-zinc-700 hover:text-zinc-100"
+                >
+                  <Plus className="h-4 w-4" />
+                  Inscribir Ramo de la Malla
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                className="w-80 sm:w-96 p-0 border-zinc-800 bg-zinc-900 shadow-2xl"
+                align="center"
+              >
+                <Command className="bg-transparent text-zinc-100">
+                  <CommandInput
+                    placeholder="Buscar por código o nombre..."
+                    className="text-xs"
+                  />
+                  <CommandList className="max-h-64 overflow-y-auto">
+                    <CommandEmpty className="py-4 text-center text-xs text-zinc-400">
+                      No se encontraron asignaturas disponibles.
+                    </CommandEmpty>
+                    <CommandGroup heading="Asignaturas Disponibles">
+                      {availableToEnroll.map((course) => (
+                        <CommandItem
+                          key={course.sigla}
+                          value={`${course.sigla} ${course.nombre}`}
+                          onSelect={() => handleEnroll(course.sigla)}
+                          className="flex items-center justify-between p-2.5 text-xs text-zinc-200 hover:bg-zinc-800/80 cursor-pointer rounded-md"
+                        >
+                          <div>
+                            <span className="font-mono font-bold text-zinc-100">
+                              {course.sigla}
+                            </span>{" "}
+                            • {course.nombre}
+                          </div>
+                          <span className="text-[10px] text-zinc-400 font-mono">
+                            {course.creditos_sct} SCT
+                          </span>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          <div className="pt-4 border-t border-zinc-800/80 text-[11px] text-zinc-500 max-w-sm mx-auto flex items-center justify-center gap-1.5">
+            <span>El modelo algebraico incluye:</span>
+            <span className="text-zinc-400 font-mono">drop_worst</span>
+            <span>•</span>
+            <span className="text-zinc-400 font-mono">mínimos ≥ 50</span>
+            <span>•</span>
+            <span className="text-zinc-400 font-mono">NF ≥ 55</span>
+          </div>
+        </div>
+      ) : (
+        /* Enrolled Course Cards Stack */
+        <div className="space-y-5">
+          {enrolledSiglas.map((sigla) => {
+            const courseConfig = inProgressCourses[sigla];
+            if (!courseConfig) return null;
+
+            const formula = ensureFormulaConfig(courseConfig);
+            const solveResult = getSubFormulaSolveResult(sigla);
+            if (!solveResult) return null;
+
+            const courseInfo =
+              curriculum.ramos.find(
+                (r) => r.sigla.toUpperCase() === sigla.toUpperCase()
+              ) || null;
+
+            const areaInfo = courseInfo?.area
+              ? curriculum.areas[courseInfo.area] || null
+              : null;
+
+            return (
+              <CourseSolverCard
+                key={sigla}
+                sigla={sigla}
+                formula={formula}
+                courseInfo={courseInfo}
+                areaInfo={areaInfo}
+                solveResult={solveResult}
+                onUnenroll={unenrollCourse}
+                onScoreChange={(s, bId, eId, score) =>
+                  setSubFormulaEvaluationScore(s, bId, eId, score)
+                }
+                onQuickApprove={(s, grade) => toggleCourseApproval(s, grade)}
+              />
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

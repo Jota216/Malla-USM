@@ -179,7 +179,7 @@ export function Navbar({ activeTab, onTabChange }: NavbarProps) {
               }`}
             >
               <Calculator className="h-4 w-4" />
-              <span>Wolfram USM Solver</span>
+              <span>Ramos en Curso</span>
               {stats.inProgressCoursesCount > 0 && (
                 <span className="inline-flex items-center justify-center px-1.5 py-0.2 text-[10px] font-bold rounded-full bg-[#D99B00] text-slate-900">
                   {stats.inProgressCoursesCount}
