@@ -1,0 +1,48 @@
+import * as React from "react";
+import { Navbar } from "@/components/layout/Navbar";
+import { Footer } from "@/components/layout/Footer";
+import { CurriculumGrid } from "@/components/curriculum/CurriculumGrid";
+import { SemesterSolver } from "@/components/solver/SemesterSolver";
+import { AnalyticsDashboard } from "@/components/analytics/AnalyticsDashboard";
+import { useAcademicStore } from "@/store/useAcademicStore";
+
+export default function App() {
+  const [activeTab, setActiveTab] = React.useState<string>("curriculum");
+  const { setSelectedCourse } = useAcademicStore();
+
+  const handleNavigateToSolver = (sigla: string) => {
+    setSelectedCourse(sigla);
+    setActiveTab("solver");
+  };
+
+  return (
+    <div className="min-h-screen bg-background text-foreground flex flex-col font-sans selection:bg-[#002B49] selection:text-[#D99B00]">
+      {/* Institutional USM Header Navigation */}
+      <Navbar activeTab={activeTab} onTabChange={setActiveTab} />
+
+      {/* Main View Container */}
+      <main className="flex-1 container max-w-7xl mx-auto px-3 sm:px-4 py-5">
+        {activeTab === "curriculum" && (
+          <div className="space-y-4 animate-in fade-in-50 duration-200">
+            <CurriculumGrid onNavigateToSolver={handleNavigateToSolver} />
+          </div>
+        )}
+
+        {activeTab === "solver" && (
+          <div className="space-y-4 animate-in fade-in-50 duration-200">
+            <SemesterSolver />
+          </div>
+        )}
+
+        {activeTab === "analytics" && (
+          <div className="space-y-4 animate-in fade-in-50 duration-200">
+            <AnalyticsDashboard />
+          </div>
+        )}
+      </main>
+
+      {/* Modern Institutional Footer */}
+      <Footer />
+    </div>
+  );
+}
