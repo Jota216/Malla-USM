@@ -1,6 +1,9 @@
 import * as React from "react";
 import { useAcademicStore } from "@/shared/store/useAcademicStore";
-import { ensureFormulaConfig } from "@/wolfram-solver/templates/defaultTemplates";
+import {
+  ensureFormulaConfig,
+  syncGroupsFromFormula,
+} from "@/wolfram-solver/templates/defaultTemplates";
 import { CourseSolverCard } from "./CourseSolverCard";
 import { EnrollCourseModal } from "./EnrollCourseModal";
 import { Button } from "@/frontend/components/ui/button";
@@ -19,6 +22,7 @@ export function SemesterSolver() {
     unenrollCourse,
     loadInf292Example,
     setSubFormulaEvaluationScore,
+    updateCourseFormula,
     toggleCourseApproval,
     getSubFormulaSolveResult,
   } = useAcademicStore();
@@ -197,9 +201,17 @@ export function SemesterSolver() {
                 courseInfo={courseInfo}
                 areaInfo={areaInfo}
                 solveResult={solveResult}
+                sede={curriculum.sede}
                 onUnenroll={unenrollCourse}
                 onScoreChange={(s, bId, eId, score) =>
                   setSubFormulaEvaluationScore(s, bId, eId, score)
+                }
+                onUpdateFormula={(s, newFormula) =>
+                  updateCourseFormula(s, (cfg) => ({
+                    ...cfg,
+                    formulaConfig: newFormula,
+                    groups: syncGroupsFromFormula(newFormula),
+                  }))
                 }
                 onQuickApprove={(s, grade) => toggleCourseApproval(s, grade)}
               />

@@ -6,6 +6,8 @@ import {
   AreaInfo,
   CourseFinalFormula,
 } from "@/shared/types/academic";
+import { sigaService } from "@/curricula/services/sigaService";
+import { FormulaEditorModal } from "./FormulaEditorModal";
 import { Card, CardHeader, CardContent } from "@/frontend/components/ui/card";
 import { Badge } from "@/frontend/components/ui/badge";
 import { Button } from "@/frontend/components/ui/button";
@@ -16,6 +18,9 @@ import {
   AlertTriangle,
   XCircle,
   TrendingUp,
+  SlidersHorizontal,
+  FileText,
+  Sparkles,
 } from "lucide-react";
 
 interface CourseSolverCardProps {
@@ -24,6 +29,7 @@ interface CourseSolverCardProps {
   courseInfo: Course | null;
   areaInfo: AreaInfo | null;
   solveResult: SubFormulaCourseSolveResult;
+  sede?: string;
   onUnenroll: (sigla: string) => void;
   onScoreChange: (
     sigla: string,
@@ -31,6 +37,7 @@ interface CourseSolverCardProps {
     evalId: string,
     score: number | null
   ) => void;
+  onUpdateFormula?: (sigla: string, newFormula: CourseFinalFormula) => void;
   onQuickApprove?: (sigla: string, grade: number) => void;
 }
 
@@ -67,10 +74,32 @@ export function CourseSolverCard({
   courseInfo,
   areaInfo,
   solveResult,
+  sede = "Casa Central Valparaíso",
   onUnenroll,
   onScoreChange,
+  onUpdateFormula,
   onQuickApprove,
 }: CourseSolverCardProps) {
+  const [editorOpen, setEditorOpen] = React.useState(false);
+  const [resolvedPdfUrl, setResolvedPdfUrl] = React.useState<string | null>(
+    formula.syllabusPdfUrl || courseInfo?.programa_pdf || null
+  );
+
+  React.useEffect(() => {
+    const direct = formula.syllabusPdfUrl || courseInfo?.programa_pdf || null;
+    if (direct) {
+      setResolvedPdfUrl(direct);
+      return;
+    }
+    let mounted = true;
+    sigaService.getSyllabusPdfUrl(sigla, sede).then((url) => {
+      if (mounted && url) setResolvedPdfUrl(url);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [sigla, sede, formula.syllabusPdfUrl, courseInfo?.programa_pdf]);
+
   const blocks = formula.subFormulas || [];
 
   // Calculate total unknowns (Z) and guaranteed points with 0 in remaining (X)
@@ -84,14 +113,18 @@ export function CourseSolverCard({
   );
 
   const normalizedWeights = React.useMemo(() => {
-    const sum = blocks.reduce((acc, b) => acc + (b.weightInFinal > 0 ? b.weightInFinal : 0), 0);
+    const sum = blocks.reduce(
+      (acc, b) => acc + (b.weightInFinal > 0 ? b.weightInFinal : 0),
+      0
+    );
     if (sum <= 0) return blocks.map(() => 1 / blocks.length);
     return blocks.map((b) => (b.weightInFinal > 0 ? b.weightInFinal / sum : 0));
   }, [blocks]);
 
   const accumulatedPointsWithZero = React.useMemo(() => {
     return solveResult.blocks.reduce(
-      (acc, b, idx) => acc + normalizedWeights[idx] * (b.projectedAverageWithZero ?? 0),
+      (acc, b, idx) =>
+        acc + normalizedWeights[idx] * (b.projectedAverageWithZero ?? 0),
       0
     );
   }, [solveResult.blocks, normalizedWeights]);
@@ -103,7 +136,9 @@ export function CourseSolverCard({
   const isApproved =
     solveResult.status === "APPROVED" ||
     (X >= formula.passingGrade &&
-      solveResult.blocks.every((b) => b.minGradeRequired === null || (b.requiredForBlockMin ?? 0) <= 0));
+      solveResult.blocks.every(
+        (b) => b.minGradeRequired === null || (b.requiredForBlockMin ?? 0) <= 0
+      ));
 
   const isFailed = solveResult.status === "FAILED" && Z === 0;
 
@@ -135,7 +170,9 @@ export function CourseSolverCard({
   const conditionString = React.useMemo(() => {
     const mins = blocks.filter((b) => b.minGradeRequired !== null);
     if (mins.length === 0) return null;
-    const conds = mins.map((b) => `${b.code} ≥ ${b.minGradeRequired}`).join(" ∧ ");
+    const conds = mins
+      .map((b) => `${b.code} ≥ ${b.minGradeRequired}`)
+      .join(" ∧ ");
     return `Condición: ${conds} (sino NF = min)`;
   }, [blocks]);
 
@@ -143,7 +180,7 @@ export function CourseSolverCard({
     <Card className="bg-zinc-900 border-zinc-800 text-zinc-100 shadow-lg rounded-xl overflow-hidden transition-all hover:border-zinc-700/80">
       {/* 1. Header */}
       <CardHeader className="p-4 sm:p-5 border-b border-zinc-800/80 bg-zinc-900/90 flex flex-row items-center justify-between gap-3 space-y-0">
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2.5 flex-wrap">
           <div className="flex items-center gap-2">
             <span
               className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
@@ -164,7 +201,25 @@ export function CourseSolverCard({
               variant="outline"
               className="border-zinc-800 bg-zinc-950/60 text-zinc-400 text-[11px] font-normal"
             >
-              Sem. {courseInfo.semestre} • {courseInfo.creditos_usm} USM / {courseInfo.creditos_sct} SCT
+              Sem. {courseInfo.semestre} • {courseInfo.creditos_usm} USM /{" "}
+              {courseInfo.creditos_sct} SCT
+            </Badge>
+          )}
+
+          {formula.sourceLabel && (
+            <Badge
+              variant="outline"
+              className={`text-[10px] font-medium gap-1 ${
+                formula.source === "siga_pdf"
+                  ? "border-amber-500/40 bg-amber-950/30 text-amber-300"
+                  : formula.source === "custom"
+                  ? "border-blue-500/40 bg-blue-950/30 text-blue-300"
+                  : "border-zinc-700 bg-zinc-950/60 text-zinc-300"
+              }`}
+              title="Origen de los requisitos de evaluación cargados para esta asignatura"
+            >
+              <Sparkles className="h-2.5 w-2.5 text-amber-400" />
+              <span>{formula.sourceLabel}</span>
             </Badge>
           )}
 
@@ -178,11 +233,43 @@ export function CourseSolverCard({
 
         {/* Header Actions */}
         <div className="flex items-center gap-1.5 shrink-0">
+          {resolvedPdfUrl && (
+            <a
+              href={resolvedPdfUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs font-medium text-zinc-300 hover:text-amber-300 bg-zinc-950/70 hover:bg-zinc-800 border border-zinc-800 transition-colors"
+              title="Abrir Programa Oficial de Asignatura en PDF (SIGA USM)"
+            >
+              <FileText className="h-3.5 w-3.5 text-amber-400" />
+              <span className="hidden lg:inline">Programa PDF</span>
+            </a>
+          )}
+
+          {onUpdateFormula && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setEditorOpen(true)}
+              className="h-8 px-2.5 text-xs font-semibold text-amber-300 border-amber-500/30 bg-amber-950/20 hover:bg-amber-950/40 hover:text-amber-200 gap-1.5"
+              title="Configurar porcentajes, evaluaciones, descarte de peores notas o plantillas USM"
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5 text-amber-400" />
+              <span className="hidden sm:inline">Configurar Fórmula</span>
+            </Button>
+          )}
+
           {onQuickApprove && (
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => onQuickApprove(sigla, Math.round(solveResult.currentFinalGrade || 55))}
+              onClick={() =>
+                onQuickApprove(
+                  sigla,
+                  Math.round(solveResult.currentFinalGrade || 55)
+                )
+              }
               className="h-8 px-2.5 text-xs font-medium text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/30 gap-1.5"
               title="Aprobar ramo y transferir nota final a tu malla curricular"
             >
@@ -216,7 +303,9 @@ export function CourseSolverCard({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
             {blocks.map((block) => {
-              const bResult = solveResult.blocks.find((b) => b.blockId === block.id);
+              const bResult = solveResult.blocks.find(
+                (b) => b.blockId === block.id
+              );
               const avg = bResult?.currentAverage;
               const minReq = block.minGradeRequired;
               const hasMin = minReq !== null;
@@ -224,11 +313,17 @@ export function CourseSolverCard({
 
               let typeDesc = "Promedio simple";
               if (block.type === "drop_worst") {
-                typeDesc = `${block.count} Controles, descarta ${block.dropWorstCount || 1} peor`;
+                const dropN = block.dropWorstCount || 1;
+                typeDesc = `${block.evaluations.length} eval., descarta ${dropN} ${
+                  dropN === 1 ? "peor" : "peores"
+                }`;
               } else if (block.type === "simple_average") {
-                typeDesc = `${block.count} ${block.name}`;
+                typeDesc = `${block.evaluations.length} ${block.name}`;
               } else if (block.type === "weighted") {
-                typeDesc = `Ponderado interno`;
+                const weightsStr = block.evaluations
+                  .map((e) => `${e.weight}%`)
+                  .join(" / ");
+                typeDesc = `Ponderado (${weightsStr})`;
               }
 
               return (
@@ -241,11 +336,18 @@ export function CourseSolverCard({
                       {block.code}
                     </span>
                     <span className="text-[10px] font-semibold text-zinc-400">
-                      {Math.round(block.weightInFinal * (block.weightInFinal <= 1 ? 100 : 1))}%
+                      {Math.round(
+                        block.weightInFinal *
+                          (block.weightInFinal <= 1 ? 100 : 1)
+                      )}
+                      %
                     </span>
                   </div>
 
-                  <div className="text-[11px] text-zinc-400 line-clamp-1" title={block.name}>
+                  <div
+                    className="text-[11px] text-zinc-400 line-clamp-1"
+                    title={block.name}
+                  >
                     {typeDesc}
                   </div>
 
@@ -253,14 +355,19 @@ export function CourseSolverCard({
                     <span className="text-zinc-400">
                       Promedio:{" "}
                       <strong className="text-zinc-100 font-mono">
-                        {avg !== null && avg !== undefined ? avg.toFixed(1) : "—"}
+                        {avg !== null && avg !== undefined
+                          ? avg.toFixed(1)
+                          : "—"}
                       </strong>
                     </span>
 
                     {hasMin ? (
                       (() => {
                         const reqMin = bResult?.requiredForBlockMin;
-                        const isReachable = reqMin !== null && reqMin !== undefined && reqMin <= 100;
+                        const isReachable =
+                          reqMin !== null &&
+                          reqMin !== undefined &&
+                          reqMin <= 100;
                         return (
                           <span
                             className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${
@@ -274,7 +381,9 @@ export function CourseSolverCard({
                               meetsMin
                                 ? "Cumple el requisito mínimo de bloque"
                                 : reqMin !== null && reqMin !== undefined
-                                ? `Requiere promediar ${reqMin.toFixed(1)} en lo restante`
+                                ? `Requiere promediar ${reqMin.toFixed(
+                                    1
+                                  )} en lo restante`
                                 : "No cumple mínimo"
                             }
                           >
@@ -283,7 +392,9 @@ export function CourseSolverCard({
                         );
                       })()
                     ) : (
-                      <span className="text-[10px] text-zinc-500">Sin mín.</span>
+                      <span className="text-[10px] text-zinc-500">
+                        Sin mín.
+                      </span>
                     )}
                   </div>
                 </div>
@@ -292,16 +403,27 @@ export function CourseSolverCard({
           </div>
         </div>
 
-        {/* 3. Final Formula & Condition Line */}
-        <div className="rounded-lg bg-zinc-950/80 border border-zinc-800/80 px-3 py-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 text-xs font-mono">
-          <div className="text-zinc-200 font-medium tracking-tight">
-            <span className="text-amber-400 font-bold">{formulaEquation}</span>
+        {/* 3. Final Formula & Official Requirements Line */}
+        <div className="rounded-lg bg-zinc-950/80 border border-zinc-800/80 px-3 py-2.5 space-y-1.5 text-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 font-mono">
+            <div className="text-zinc-200 font-medium tracking-tight">
+              <span className="text-amber-400 font-bold">{formulaEquation}</span>
+            </div>
+
+            {conditionString && (
+              <div className="text-[11px] text-zinc-400 flex items-center gap-1">
+                <span className="text-zinc-500">•</span>
+                <span>{conditionString}</span>
+              </div>
+            )}
           </div>
 
-          {conditionString && (
-            <div className="text-[11px] text-zinc-400 flex items-center gap-1">
-              <span className="text-zinc-500">•</span>
-              <span>{conditionString}</span>
+          {formula.syllabusRequirementsNote && (
+            <div className="text-[11px] text-zinc-400 pt-1 border-t border-zinc-800/70 leading-relaxed">
+              <span className="font-semibold text-zinc-300">
+                Requisitos USM:{" "}
+              </span>
+              {formula.syllabusRequirementsNote}
             </div>
           )}
         </div>
@@ -317,7 +439,9 @@ export function CourseSolverCard({
 
           <div className="space-y-3">
             {blocks.map((block) => {
-              const bResult = solveResult.blocks.find((b) => b.blockId === block.id);
+              const bResult = solveResult.blocks.find(
+                (b) => b.blockId === block.id
+              );
               const droppedIds = getDroppedEvalIds(
                 block.evaluations,
                 bResult?.droppedScores
@@ -334,12 +458,18 @@ export function CourseSolverCard({
                         {block.name}
                       </span>
                       <span className="text-[10px] font-mono text-zinc-500">
-                        ({block.code} • {Math.round(block.weightInFinal * (block.weightInFinal <= 1 ? 100 : 1))}%)
+                        ({block.code} •{" "}
+                        {Math.round(
+                          block.weightInFinal *
+                            (block.weightInFinal <= 1 ? 100 : 1)
+                        )}
+                        %)
                       </span>
                     </div>
 
                     <div className="text-[11px] text-zinc-400 font-mono">
-                      {block.evaluations.filter((e) => e.score !== null).length} / {block.evaluations.length} ingresadas
+                      {block.evaluations.filter((e) => e.score !== null).length}{" "}
+                      / {block.evaluations.length} ingresadas
                     </div>
                   </div>
 
@@ -347,8 +477,12 @@ export function CourseSolverCard({
                   <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
                     {block.evaluations.map((ev, idx) => {
                       const isDropped = droppedIds.has(ev.id);
-                      const isUnknown = ev.score === null || ev.score === undefined || isNaN(ev.score);
-                      const displayLabel = ev.name || `${block.prefix || block.code}${idx + 1}`;
+                      const isUnknown =
+                        ev.score === null ||
+                        ev.score === undefined ||
+                        isNaN(ev.score);
+                      const displayLabel =
+                        ev.name || `${block.prefix || block.code}${idx + 1}`;
 
                       return (
                         <div
@@ -365,7 +499,9 @@ export function CourseSolverCard({
                             }`}
                             title={ev.name}
                           >
-                            {block.prefix ? `${block.prefix}${idx + 1}` : displayLabel}
+                            {block.prefix
+                              ? `${block.prefix}${idx + 1}`
+                              : displayLabel}
                           </span>
 
                           <div className="relative">
@@ -374,7 +510,11 @@ export function CourseSolverCard({
                               min={0}
                               max={100}
                               step={1}
-                              value={ev.score !== null && ev.score !== undefined ? ev.score : ""}
+                              value={
+                                ev.score !== null && ev.score !== undefined
+                                  ? ev.score
+                                  : ""
+                              }
                               placeholder="—"
                               onChange={(e) => {
                                 const raw = e.target.value.trim();
@@ -437,7 +577,8 @@ export function CourseSolverCard({
                   ¡Aprobado! Puntos asegurados: {X.toFixed(1)} pts.
                 </div>
                 <div className="text-emerald-200/90">
-                  Aún sacando 0 en lo restante apruebas el ramo (NF proyectada: ≥ 55).
+                  Aún sacando 0 en lo restante apruebas el ramo (NF proyectada:
+                  ≥ {formula.passingGrade}).
                 </div>
               </div>
             </div>
@@ -449,10 +590,12 @@ export function CourseSolverCard({
               <XCircle className="h-5 w-5 text-rose-400 shrink-0 mt-0.5" />
               <div className="space-y-0.5 text-xs sm:text-sm">
                 <div className="font-bold text-rose-300">
-                  Reprobado: Nota final obtenida: {solveResult.currentFinalGrade.toFixed(1)}.
+                  Reprobado: Nota final obtenida:{" "}
+                  {solveResult.currentFinalGrade.toFixed(1)}.
                 </div>
                 <div className="text-rose-200/90">
-                  No alcanza el mínimo de aprobación (55) o no cumplió con el requisito de bloque.
+                  No alcanza el mínimo de aprobación ({formula.passingGrade}) o
+                  no cumplió con el requisito de bloque.
                 </div>
               </div>
             </div>
@@ -464,12 +607,17 @@ export function CourseSolverCard({
               <AlertTriangle className="h-5 w-5 text-rose-400 shrink-0 mt-0.5" />
               <div className="space-y-0.5 text-xs sm:text-sm">
                 <div className="font-bold text-rose-300">
-                  En Peligro: La nota requerida supera 80 ({Y !== null ? Y.toFixed(1) : ">100"}).
+                  En Peligro: La nota requerida supera 80 (
+                  {Y !== null ? Y.toFixed(1) : ">100"}).
                 </div>
                 <div className="text-rose-200/90">
                   {Y !== null && Y > 100
-                    ? `Matemáticamente inviable con escala normal (exige ${Y.toFixed(1)}). Requiere examen recuperativo o convalidación extraordinaria.`
-                    : `Necesitas promediar ${Y?.toFixed(1) ?? "—"} en las ${Z} evaluaciones restantes. Requiere rendimiento extraordinario o examen recuperativo.`}
+                    ? `Matemáticamente inviable con escala normal (exige ${Y.toFixed(
+                        1
+                      )}). Requiere examen recuperativo o convalidación extraordinaria.`
+                    : `Necesitas promediar ${
+                        Y?.toFixed(1) ?? "—"
+                      } en las ${Z} evaluaciones restantes. Requiere rendimiento extraordinario o examen recuperativo.`}
                 </div>
               </div>
             </div>
@@ -481,10 +629,14 @@ export function CourseSolverCard({
               <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
               <div className="space-y-0.5 text-xs sm:text-sm">
                 <div className="font-bold text-amber-300">
-                  Atención: El bloque [{solveResult.bindingBlockCode || "Mínimo"}] exige promediar {Y?.toFixed(1) ?? "—"}
+                  Atención: El bloque [
+                  {solveResult.bindingBlockCode || "Mínimo"}] exige promediar{" "}
+                  {Y?.toFixed(1) ?? "—"}
                 </div>
                 <div className="text-amber-200/90">
-                  En los certámenes/evaluaciones restantes para alcanzar el mínimo de 50 (restricción más exigente que la meta global de NF ≥ 55).
+                  En los certámenes/evaluaciones restantes para alcanzar el
+                  mínimo de bloque (restricción más exigente que la meta global
+                  de NF ≥ {formula.passingGrade}).
                 </div>
               </div>
             </div>
@@ -496,20 +648,37 @@ export function CourseSolverCard({
               <TrendingUp className="h-5 w-5 text-blue-400 shrink-0 mt-0.5" />
               <div className="space-y-0.5 text-xs sm:text-sm">
                 <div className="font-bold text-zinc-100">
-                  Puntos acumulados: <span className="text-amber-400">{X.toFixed(1)} pts</span>.
+                  Puntos acumulados:{" "}
+                  <span className="text-amber-400">{X.toFixed(1)} pts</span>.
                 </div>
                 <div className="text-zinc-300">
                   Necesitas promediar{" "}
                   <strong className="text-blue-300 font-mono text-sm">
                     {Y !== null ? Y.toFixed(1) : "—"}
                   </strong>{" "}
-                  en las {Z} {Z === 1 ? "evaluación restante" : "evaluaciones restantes"} para cumplir los mínimos de bloque (≥ 50) y aprobar con NF ≥ 55.
+                  en las {Z}{" "}
+                  {Z === 1 ? "evaluación restante" : "evaluaciones restantes"}{" "}
+                  para cumplir los requisitos y aprobar con NF ≥{" "}
+                  {formula.passingGrade}.
                 </div>
               </div>
             </div>
           )}
         </div>
       </CardContent>
+
+      {/* Modal de Configuración Interactiva de Fórmula y Requisitos */}
+      {onUpdateFormula && (
+        <FormulaEditorModal
+          open={editorOpen}
+          onOpenChange={setEditorOpen}
+          sigla={sigla}
+          courseInfo={courseInfo}
+          currentFormula={formula}
+          sede={sede}
+          onSaveFormula={(newFormula) => onUpdateFormula(sigla, newFormula)}
+        />
+      )}
     </Card>
   );
 }
