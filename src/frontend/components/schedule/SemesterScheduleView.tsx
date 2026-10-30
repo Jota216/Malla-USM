@@ -15,6 +15,7 @@ import {
   ProfessorReviewSummary,
 } from "@/shared/types/academic";
 import { EnrollCourseModal } from "@/frontend/components/solver/EnrollCourseModal";
+import { ProfessorReviewModal } from "./ProfessorReviewModal";
 import {
   Card,
   CardContent,
@@ -41,6 +42,7 @@ import {
   GraduationCap,
   Search,
   Eye,
+  Download,
 } from "lucide-react";
 
 interface ScheduledCellEntry {
@@ -102,6 +104,10 @@ export function SemesterScheduleView() {
   const [loading, setLoading] = React.useState<boolean>(false);
   const [globalSearch, setGlobalSearch] = React.useState<string>("");
   const [enrollModalOpen, setEnrollModalOpen] = React.useState<boolean>(false);
+  const [selectedProfForModal, setSelectedProfForModal] = React.useState<{
+    name: string;
+    review: ProfessorReviewSummary | null;
+  } | null>(null);
 
   // Live hover preview state (AlvinIsCrack style)
   const [hoveredPreview, setHoveredPreview] = React.useState<{
@@ -449,6 +455,90 @@ export function SemesterScheduleView() {
     60
   ).toFixed(1);
 
+  const handleOpenProfModal = async (
+    e: React.MouseEvent,
+    profName: string
+  ) => {
+    e.stopPropagation();
+    const cached = profReviews[profName] || (await getProfessorReview(profName));
+    setSelectedProfForModal({
+      name: profName,
+      review: cached || null,
+    });
+  };
+
+  const handleExportIcs = () => {
+    const lines: string[] = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//Malla USM//Horario Semestral SIGA//ES",
+      "CALSCALE:GREGORIAN",
+    ];
+
+    // Base Monday of current week
+    const now = new Date();
+    const dayOfWeek = now.getDay(); // 0=Sun..6=Sat
+    const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const baseMonday = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() + diffToMonday
+    );
+
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const fmtDate = (d: Date, hhmm: string) => {
+      const [hh, mm] = hhmm.split(":");
+      return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(
+        d.getDate()
+      )}T${hh}${mm}00`;
+    };
+
+    for (const pairObj of USM_BLOCK_PAIRS) {
+      const [startStr, endStr] = pairObj.time.split(" - ").map((s) => s.trim());
+      for (let dia = 0; dia < 6; dia++) {
+        const entries = (gridMap[`${dia}-${pairObj.pair}`] || []).filter(
+          (e) => !e.isPreview
+        );
+        for (const entry of entries) {
+          const eventDate = new Date(baseMonday);
+          eventDate.setDate(baseMonday.getDate() + dia);
+          const dtStart = fmtDate(eventDate, startStr);
+          const dtEnd = fmtDate(eventDate, endStr);
+          lines.push("BEGIN:VEVENT");
+          lines.push(
+            `UID:${entry.sigla}-${entry.paralelo}-${dia}-${pairObj.pair}@malla-usm`
+          );
+          lines.push(`DTSTART:${dtStart}`);
+          lines.push(`DTEND:${dtEnd}`);
+          lines.push("RRULE:FREQ=WEEKLY;COUNT=17");
+          lines.push(
+            `SUMMARY:${entry.sigla} (${entry.tipo}) - Par. ${entry.paralelo}`
+          );
+          lines.push(
+            `DESCRIPTION:${entry.nombre}\\nProfesor: ${
+              entry.profesor || "Por definir"
+            }`
+          );
+          if (entry.sala) {
+            lines.push(`LOCATION:Sala ${entry.sala} (${selectedSede})`);
+          }
+          lines.push("END:VEVENT");
+        }
+      }
+    }
+
+    lines.push("END:VCALENDAR");
+    const blob = new Blob([lines.join("\r\n")], {
+      type: "text/calendar;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `horario-usm-${selectedPeriod || "semestre"}.ics`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-5">
       {/* Header & Controls Card */}
@@ -508,17 +598,33 @@ export function SemesterScheduleView() {
               )}
 
               {enrolledSiglas.length > 0 && (
-                <Button
-                  type="button"
-                  variant="gold"
-                  size="sm"
-                  onClick={handleAutoAssignParallels}
-                  className="h-8 gap-1.5 text-xs"
-                  title="Buscar combinación de paralelos sin topes de horario"
-                >
-                  <Wand2 className="h-3.5 w-3.5" />
-                  <span>Auto-asignar sin Topes</span>
-                </Button>
+                <>
+                  <Button
+                    type="button"
+                    variant="gold"
+                    size="sm"
+                    onClick={handleAutoAssignParallels}
+                    className="h-8 gap-1.5 text-xs"
+                    title="Buscar combinación de paralelos sin topes de horario"
+                  >
+                    <Wand2 className="h-3.5 w-3.5" />
+                    <span>Auto-asignar sin Topes</span>
+                  </Button>
+
+                  {assignedCoursesCount > 0 && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleExportIcs}
+                      className="h-8 gap-1.5 text-xs"
+                      title="Exportar horario semanal a Google Calendar / Apple Calendar / Outlook (.ics)"
+                    >
+                      <Download className="h-3.5 w-3.5 text-[#D99B00]" />
+                      <span>Exportar .ics</span>
+                    </Button>
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -827,15 +933,31 @@ export function SemesterScheduleView() {
                                   <span>Paralelo {par.paralelo}</span>
                                 </span>
                                 <div className="flex items-center gap-1.5">
-                                  {profRev?.stats.claridad_expositiva && (
+                                  {profRev?.stats.claridad_expositiva && firstProf && (
                                     <span
-                                      className="inline-flex items-center gap-0.5 text-[10px] text-amber-600 dark:text-amber-400 font-bold"
-                                      title="Claridad expositiva según evaluación estudiantil"
+                                      role="button"
+                                      tabIndex={0}
+                                      onClick={(e) =>
+                                        handleOpenProfModal(e, firstProf)
+                                      }
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter") {
+                                          handleOpenProfModal(
+                                            e as unknown as React.MouseEvent,
+                                            firstProf
+                                          );
+                                        }
+                                      }}
+                                      className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-500/15 hover:bg-amber-500/30 border border-amber-500/30 text-[10px] text-amber-600 dark:text-amber-400 font-bold cursor-pointer transition-colors"
+                                      title="Haz clic para ver reseñas, etiquetas y comentarios de este profesor"
                                     >
                                       <Star className="h-2.5 w-2.5 fill-current" />
                                       {profRev.stats.claridad_expositiva.avg.toFixed(
                                         1
                                       )}
+                                      <span className="text-[9px] underline ml-0.5">
+                                        Reseñas
+                                      </span>
                                     </span>
                                   )}
                                   <span className="text-[10px] text-muted-foreground">
@@ -1010,6 +1132,16 @@ export function SemesterScheduleView() {
       <EnrollCourseModal
         open={enrollModalOpen}
         onOpenChange={setEnrollModalOpen}
+      />
+
+      {/* Professor Reviews & Metrics Modal */}
+      <ProfessorReviewModal
+        open={!!selectedProfForModal}
+        onOpenChange={(open) => {
+          if (!open) setSelectedProfForModal(null);
+        }}
+        professorName={selectedProfForModal?.name || ""}
+        review={selectedProfForModal?.review || null}
       />
     </div>
   );
