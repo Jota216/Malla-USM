@@ -57,11 +57,11 @@ flowchart LR
 
 ## 2. Arquitectura y Stack Tecnológico
 
-El proyecto sigue una arquitectura desacoplada y orientada a tipos, estructurada en capas independientes: interfaz de usuario, estado global reactivo, lógica matemática pura y servicios de datos.
+El proyecto sigue una arquitectura desacoplada y orientada a tipos, estructurada en dominios modulares independientes: interfaz de usuario (`frontend/`), resolución de notas y restricciones algebraicas (`wolfram-solver/`), planes de estudio y grafos curriculares (`curricula/`), y estado y utilidades transversales (`shared/`).
 
 ```mermaid
 flowchart TD
-    subgraph UI_Layer [Capa de Presentación UI - React 18]
+    subgraph Frontend_Domain [Dominio Frontend - React 18 & UI]
         Navbar[Navbar & Header Métricas]
         CurriculumView[CurriculumGrid & CourseCard]
         SolverView[SemesterSolver & FormulaBuilder]
@@ -69,29 +69,33 @@ flowchart TD
         DashboardView[AnalyticsDashboard & Milestones]
     end
 
-    subgraph Store_Layer [Capa de Estado Global - Zustand]
+    subgraph Shared_Domain [Dominio Shared - Estado & Tipos Canónicos]
         Store[useAcademicStore]
         Persist[Zustand persist Middleware]
         Storage[(localStorage Client)]
+        Types[academic.ts - Tipos Canónicos]
+        Utils[utils.ts & QA Tests]
         Store <--> Persist <--> Storage
     end
 
-    subgraph Engine_Layer [Capa de Motores Puros - TypeScript Engine]
-        GraphEngine[graphUnlock.ts - DAG & BFS/DFS]
+    subgraph Wolfram_Domain [Dominio Wolfram-Solver - Motores Algebraicos]
         SolverEngine[gradeSolver.ts - Álgebra Lineal & Sliders]
-        SubFormulaEngine[Sub-formulas Solver & Constraint Verification]
+        SubFormulaEngine[subFormulaSolver.ts - Sub-fórmulas & Mínimos]
+        Templates[defaultTemplates & inf292Template]
+        SolverEngine --- SubFormulaEngine
     end
 
-    subgraph Service_Layer [Capa de Servicios & Abstracción]
+    subgraph Curricula_Domain [Dominio Curricula - Grafo DAG & Datos]
+        GraphEngine[graphUnlock.ts - DAG & BFS/DFS]
         CurriculumService[curriculumService.ts]
         SigaService[sigaService.ts - Integración / Mock / Backup]
-        DataJSON[(ici-2014.json & defaultTemplates)]
+        DataJSON[(ici-2014.json Malla Oficial)]
     end
 
-    UI_Layer --> Store_Layer
-    Store_Layer --> Engine_Layer
-    Store_Layer --> Service_Layer
-    Service_Layer --> DataJSON
+    Frontend_Domain --> Shared_Domain
+    Shared_Domain --> Wolfram_Domain
+    Shared_Domain --> Curricula_Domain
+    Curricula_Domain --> DataJSON
 ```
 
 ### 2.1 Especificaciones Técnicas
@@ -121,51 +125,64 @@ Malla_USM/
 ├── node_modules/                   # Dependencias instaladas vía npm
 ├── public/                         # Recursos estáticos servidos directamente
 ├── src/
-│   ├── components/                 # Componentes de presentación divididos por dominio
-│   │   ├── analytics/
-│   │   │   └── AnalyticsDashboard.tsx # Métricas de titulación, GPA, avance SCT e hitos
-│   │   ├── curriculum/
-│   │   │   ├── CourseCard.tsx         # Tarjeta interactiva de asignatura con estados y colores
-│   │   │   ├── CourseDetailModal.tsx  # Modal de inspección profunda y dependencias del ramo
-│   │   │   ├── CurriculumGrid.tsx     # Grilla horizontal/vertical de los 11 semestres
-│   │   │   └── SemesterColumn.tsx     # Contenedor de asignaturas pertenecientes a un semestre
-│   │   ├── layout/
-│   │   │   ├── DataBackupModal.tsx    # Modal de exportación/importación de JSON
-│   │   │   ├── Footer.tsx             # Pie institucional USM de código abierto
-│   │   │   └── Navbar.tsx             # Navegación principal, contadores y botones de acción
-│   │   ├── solver/
-│   │   │   ├── FormulaBuilder.tsx     # Editor estructurado de grupos, pesos y evaluaciones
-│   │   │   ├── InteractiveSliders.tsx # Sliders dinámicos para simulación de notas "what-if"
-│   │   │   ├── SemesterSolver.tsx     # Vista orquestadora de asignaturas en curso
-│   │   │   └── SolverOutput.tsx       # Desglose numérico y alertas de restricción vinculante
-│   │   └── ui/                        # Primitivas modulares shadcn/ui (Button, Dialog, Badge, Tabs, etc.)
-│   ├── data/
-│   │   ├── defaultTemplates.ts        # Silabos base (Ponderaciones estándar USM e INF-292)
-│   │   └── ici-2014.json              # Malla oficial 7313 (Civil Informática Plan 2014)
-│   ├── engine/                        # Motores matemáticos puros (deterministas y testeables)
-│   │   ├── gradeSolver.test.ts        # Suite de tests unitarios del solver general y DAG
-│   │   ├── gradeSolver.ts             # Algoritmo de resolución lineal y análisis de restricciones
-│   │   ├── graphUnlock.ts             # Algoritmos de grafos (DAG, ciclo, BFS y desbloqueos)
-│   │   ├── qaIntegration.test.ts      # Suite integral de QA (persistencia, INF-292, penalización y backups)
-│   │   ├── subFormulaSolver.test.ts   # Suite de tests unitarios de sub-fórmulas y mínimos de bloque
-│   │   └── subFormulaSolver.ts        # Motor matemático para sub-fórmulas y regla de penalización USM
-│   ├── lib/
-│   │   └── utils.ts                   # Helpers compartidos (`cn` para concatenación de clases Tailwind)
-│   ├── services/                      # Capa de abstracción de datos para orígenes locales y remotos
-│   │   ├── curriculumService.ts       # Proveedor asíncrono de planes y créditos
-│   │   └── sigaService.ts             # Interfaz preparada para sincronización con portal SIGA USM
-│   ├── store/
-│   │   └── useAcademicStore.ts        # Store global Zustand con middleware de persistencia en localStorage
-│   ├── types/
-│   │   └── academic.ts                # Definiciones canónicas de tipos TypeScript del dominio
-│   ├── App.tsx                        # Componente raíz con control de vistas por pestañas
-│   ├── index.css                      # Estilos globales, variables HSL corporativas USM y tema oscuro
-│   └── main.tsx                       # Punto de entrada de la aplicación en el DOM
-├── index.html                         # Plantilla HTML5 con viewport optimizado
-├── package.json                       # Manifiesto de dependencias y scripts de construcción
-├── tailwind.config.js                 # Configuración de colores corporativos USM y plugins
-├── tsconfig.json                      # Configuración del compilador TypeScript
-└── vite.config.ts                     # Configuración de Vite con alias `@` apuntando a `src/`
+│   ├── curricula/                  # Dominio curricular, planes de estudio y resolución de prerrequisitos
+│   │   ├── careers/
+│   │   │   └── ici-2014.json       # Malla oficial 7313 (Civil Informática Plan 2014)
+│   │   ├── prerequisites/
+│   │   │   └── graphUnlock.ts      # Algoritmos de grafos (DAG, detección de ciclos, BFS/DFS y desbloqueos)
+│   │   ├── services/
+│   │   │   ├── curriculumService.ts# Proveedor de planes de estudio y créditos
+│   │   │   └── sigaService.ts      # Abstracción y parseo para portal SIGA USM
+│   │   └── index.ts                # Punto de exportación pública del dominio curricula
+│   ├── frontend/                   # Dominio de presentación e interfaz de usuario React
+│   │   ├── components/
+│   │   │   ├── analytics/
+│   │   │   │   └── AnalyticsDashboard.tsx # Métricas de titulación, GPA, avance SCT e hitos
+│   │   │   ├── curriculum/
+│   │   │   │   ├── CourseCard.tsx         # Tarjeta interactiva de asignatura con estados y colores
+│   │   │   │   ├── CourseDetailModal.tsx  # Modal de inspección profunda y dependencias del ramo
+│   │   │   │   ├── CurriculumGrid.tsx     # Grilla horizontal/vertical de los 11 semestres
+│   │   │   │   └── SemesterColumn.tsx     # Contenedor de asignaturas pertenecientes a un semestre
+│   │   │   ├── layout/
+│   │   │   │   ├── DataBackupModal.tsx    # Modal de exportación/importación de JSON
+│   │   │   │   ├── Footer.tsx             # Pie institucional USM de código abierto
+│   │   │   │   └── Navbar.tsx             # Navegación principal, contadores y botones de acción
+│   │   │   ├── solver/
+│   │   │   │   ├── CourseSolverCard.tsx   # Tarjeta modular para cálculo individual de ramo
+│   │   │   │   ├── FormulaBuilder.tsx     # Editor estructurado de grupos, pesos y evaluaciones
+│   │   │   │   ├── InteractiveSliders.tsx # Sliders dinámicos para simulación de notas "what-if"
+│   │   │   │   ├── SemesterSolver.tsx     # Vista orquestadora de asignaturas en curso
+│   │   │   │   └── SolverOutput.tsx       # Desglose numérico y alertas de restricción vinculante
+│   │   │   └── ui/                        # Primitivas modulares shadcn/ui (Button, Dialog, Badge, Tabs, etc.)
+│   │   └── styles/
+│   │       └── index.css                  # Estilos globales, variables HSL corporativas USM y tema oscuro
+│   ├── shared/                     # Dominio transversal: estado reactivo, tipos y utilidades
+│   │   ├── lib/
+│   │   │   └── utils.ts                   # Helpers compartidos (`cn` para concatenación de clases Tailwind)
+│   │   ├── store/
+│   │   │   └── useAcademicStore.ts        # Store global Zustand con middleware de persistencia en localStorage
+│   │   ├── tests/
+│   │   │   └── qaIntegration.test.ts      # Suite integral de QA (persistencia, INF-292, penalización y backups)
+│   │   └── types/
+│   │       └── academic.ts                # Definiciones canónicas de tipos TypeScript del dominio
+│   ├── wolfram-solver/             # Dominio motor algebraico ("WolframAlpha USM") y plantillas
+│   │   ├── engine/
+│   │   │   ├── gradeSolver.ts             # Algoritmo de resolución lineal y análisis de restricciones
+│   │   │   └── subFormulaSolver.ts        # Motor matemático para sub-fórmulas y regla de penalización USM
+│   │   ├── templates/
+│   │   │   ├── defaultTemplates.ts        # Silabos base y ponderaciones estándar USM
+│   │   │   └── inf292Template.ts          # Plantilla oficial INF-292 (PCE, PC, PP con mínimos)
+│   │   ├── tests/
+│   │   │   ├── gradeSolver.test.ts        # Suite de tests unitarios del solver general
+│   │   │   └── subFormulaSolver.test.ts   # Suite de tests unitarios de sub-fórmulas y mínimos de bloque
+│   │   └── index.ts                # Punto de exportación pública del motor wolfram-solver
+│   ├── App.tsx                     # Componente raíz con control de vistas por pestañas
+│   └── main.tsx                    # Punto de entrada de la aplicación en el DOM
+├── index.html                      # Plantilla HTML5 con viewport optimizado
+├── package.json                    # Manifiesto de dependencias y scripts de construcción
+├── tailwind.config.js              # Configuración de colores corporativos USM y plugins
+├── tsconfig.json                   # Configuración del compilador TypeScript
+└── vite.config.ts                  # Configuración de Vite con alias `@` apuntando a `src/`
 ```
 
 ---
@@ -332,15 +349,19 @@ npm run preview
 ```
 
 ### 7.3 Verificación y Pruebas
-Las suites de pruebas automatizadas del motor matemático y de integración se ejecutan directamente con el compilador/ejecutor `tsx`:
+Las suites de pruebas automatizadas del motor matemático y de integración se ejecutan mediante npm o directamente con el compilador/ejecutor `tsx`:
 ```bash
+# Ejecución completa de todos los suites (sub-fórmulas, solver y QA):
+npm test
+
+# O ejecución individual de suites:
 # 1. Pruebas unitarias de sub-fórmulas y regla de penalización USM
-npx tsx src/engine/subFormulaSolver.test.ts
+npx tsx src/wolfram-solver/tests/subFormulaSolver.test.ts
 
 # 2. Pruebas unitarias del motor general y DAG de prerrequisitos
-npx tsx src/engine/gradeSolver.test.ts
+npx tsx src/wolfram-solver/tests/gradeSolver.test.ts
 
 # 3. Suite de validación integral QA, INF-292 y compatibilidad de persistencia
-npx tsx src/engine/qaIntegration.test.ts
+npx tsx src/shared/tests/qaIntegration.test.ts
 ```
 Todas las aserciones de normalización de pesos, despeje de notas, análisis de muerte súbita, descarte de notas (`min`), penalizaciones USM y persistencia reportan estado exitoso `✓` / `✅`.

@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "npx tsx src/engine/subFormulaSolver.test.ts && npx tsx src/engine/gradeSolver.test.ts && npx tsx src/engine/qaIntegration.test.ts"
+    "test": "npx tsx src/wolfram-solver/tests/subFormulaSolver.test.ts && npx tsx src/wolfram-solver/tests/gradeSolver.test.ts && npx tsx src/shared/tests/qaIntegration.test.ts"
   },
   "dependencies": {
     "react": "^18.3.1",

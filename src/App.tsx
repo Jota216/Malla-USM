@@ -1,10 +1,10 @@
 import * as React from "react";
-import { Navbar } from "@/components/layout/Navbar";
-import { Footer } from "@/components/layout/Footer";
-import { CurriculumGrid } from "@/components/curriculum/CurriculumGrid";
-import { SemesterSolver } from "@/components/solver/SemesterSolver";
-import { AnalyticsDashboard } from "@/components/analytics/AnalyticsDashboard";
-import { useAcademicStore } from "@/store/useAcademicStore";
+import { Navbar } from "@/frontend/components/layout/Navbar";
+import { Footer } from "@/frontend/components/layout/Footer";
+import { CurriculumGrid } from "@/frontend/components/curriculum/CurriculumGrid";
+import { SemesterSolver } from "@/frontend/components/solver/SemesterSolver";
+import { AnalyticsDashboard } from "@/frontend/components/analytics/AnalyticsDashboard";
+import { useAcademicStore } from "@/shared/store/useAcademicStore";
 
 export default function App() {
   const [activeTab, setActiveTab] = React.useState<string>("curriculum");
