@@ -28,6 +28,14 @@ export interface SigaSyncResult {
   record?: SigaStudentRecord;
 }
 
+export interface SigaCatalogCourse {
+  rawSigla: string;
+  sigla: string;
+  nombre: string;
+  departamento: string;
+  parallels: CourseParallel[];
+}
+
 export interface RawSigaCareerEntry {
   código: string;
   nombre: string;
@@ -304,6 +312,56 @@ class SigaService {
   }
 
   /**
+   * Devuelve el catálogo completo de asignaturas dictadas en una sede, jornada y periodo.
+   */
+  async getPeriodCatalog(
+    sede: string = 'Casa Central Valparaíso',
+    jornada: string = 'Diurna',
+    periodo?: string
+  ): Promise<{ periodo: string; courses: SigaCatalogCourse[] }> {
+    const data = await this.getHorariosDataset();
+    if (!data) return { periodo: periodo || '', courses: [] };
+
+    const sedeData = data[sede] || Object.values(data)[0];
+    if (!sedeData) return { periodo: periodo || '', courses: [] };
+
+    const jornadaData = sedeData[jornada] || Object.values(sedeData)[0];
+    if (!jornadaData) return { periodo: periodo || '', courses: [] };
+
+    const periods = Object.keys(jornadaData)
+      .filter((p) => Object.keys(jornadaData[p] || {}).length > 0)
+      .sort()
+      .reverse();
+
+    const activePeriod =
+      periodo && jornadaData[periodo] && Object.keys(jornadaData[periodo]).length > 0
+        ? periodo
+        : periods[0] || '';
+
+    if (!activePeriod || !jornadaData[activePeriod]) {
+      return { periodo: activePeriod, courses: [] };
+    }
+
+    const periodMap = jornadaData[activePeriod];
+    const courses: SigaCatalogCourse[] = [];
+
+    for (const [rawSigla, parMap] of Object.entries(periodMap)) {
+      const parallels = Object.values(parMap);
+      if (parallels.length === 0) continue;
+      const first = parallels[0];
+      courses.push({
+        rawSigla,
+        sigla: formatUsmSigla(rawSigla),
+        nombre: first.nombre || rawSigla,
+        departamento: first.departamento || 'GENERAL',
+        parallels,
+      });
+    }
+
+    return { periodo: activePeriod, courses };
+  }
+
+  /**
    * Devuelve todos los paralelos de una asignatura para la sede, jornada y periodo indicados.
    * Si no se especifica periodo, busca automáticamente en el periodo más reciente que tenga datos.
    */
@@ -492,6 +550,14 @@ export async function getCourseParallels(
 ): Promise<CourseParallel[]> {
   const res = await sigaService.getCourseParallels(sigla, sede, jornada, periodo);
   return res.parallels;
+}
+
+export async function getPeriodCatalog(
+  sede?: string,
+  jornada?: string,
+  periodo?: string
+): Promise<{ periodo: string; courses: SigaCatalogCourse[] }> {
+  return sigaService.getPeriodCatalog(sede, jornada, periodo);
 }
 
 export async function getSyllabusPdfUrl(

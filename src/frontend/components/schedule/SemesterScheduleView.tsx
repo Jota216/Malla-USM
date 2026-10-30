@@ -2,12 +2,19 @@ import * as React from "react";
 import { useAcademicStore } from "@/shared/store/useAcademicStore";
 import {
   getCourseParallels,
+  getPeriodCatalog,
+  getProfessorReview,
   getSchedulePeriods,
   groupScheduleBlocks,
+  SigaCatalogCourse,
   USM_BAR_DAYS,
   USM_BLOCK_PAIRS,
 } from "@/curricula/services/sigaService";
-import { CourseParallel } from "@/shared/types/academic";
+import {
+  CourseParallel,
+  ProfessorReviewSummary,
+} from "@/shared/types/academic";
+import { EnrollCourseModal } from "@/frontend/components/solver/EnrollCourseModal";
 import {
   Card,
   CardContent,
@@ -30,6 +37,10 @@ import {
   Wand2,
   Loader2,
   BookOpen,
+  Star,
+  GraduationCap,
+  Search,
+  Eye,
 } from "lucide-react";
 
 interface ScheduledCellEntry {
@@ -40,6 +51,7 @@ interface ScheduledCellEntry {
   sala: string;
   profesor: string;
   color: string;
+  isPreview?: boolean;
 }
 
 const SEDES_USM = [
@@ -48,6 +60,17 @@ const SEDES_USM = [
   "Santiago Vitacura",
   "Viña del Mar",
   "Concepción",
+];
+
+const COURSE_PALETTE = [
+  "#0B72D4",
+  "#2E8B57",
+  "#D97706",
+  "#7C3AED",
+  "#DB2777",
+  "#0891B2",
+  "#4F46E5",
+  "#EA580C",
 ];
 
 export function SemesterScheduleView() {
@@ -67,11 +90,24 @@ export function SemesterScheduleView() {
   );
   const [periods, setPeriods] = React.useState<string[]>([]);
   const [selectedPeriod, setSelectedPeriod] = React.useState<string>("");
+  const [periodCatalog, setPeriodCatalog] = React.useState<SigaCatalogCourse[]>(
+    []
+  );
   const [parallelsByCourse, setParallelsByCourse] = React.useState<
     Record<string, CourseParallel[]>
   >({});
+  const [profReviews, setProfReviews] = React.useState<
+    Record<string, ProfessorReviewSummary>
+  >({});
   const [loading, setLoading] = React.useState<boolean>(false);
-  const [quickAddSearch, setQuickAddSearch] = React.useState<string>("");
+  const [globalSearch, setGlobalSearch] = React.useState<string>("");
+  const [enrollModalOpen, setEnrollModalOpen] = React.useState<boolean>(false);
+
+  // Live hover preview state (AlvinIsCrack style)
+  const [hoveredPreview, setHoveredPreview] = React.useState<{
+    sigla: string;
+    parallel: CourseParallel;
+  } | null>(null);
 
   // Sync default sede/jornada when curriculum changes
   React.useEffect(() => {
@@ -79,27 +115,44 @@ export function SemesterScheduleView() {
     if (curriculum.jornada) setSelectedJornada(curriculum.jornada);
   }, [curriculum.sede, curriculum.jornada]);
 
-  // Load available periods for the selected sede & jornada
+  // Load available periods and full SIGA catalog for the selected sede & jornada
   React.useEffect(() => {
     let cancelled = false;
-    getSchedulePeriods(selectedSede, selectedJornada).then((pList) => {
-      if (cancelled) return;
-      setPeriods(pList);
-      if (pList.length > 0 && (!selectedPeriod || !pList.includes(selectedPeriod))) {
-        setSelectedPeriod(pList[0]);
-      }
-    });
+    setLoading(true);
+    getSchedulePeriods(selectedSede, selectedJornada)
+      .then(async (pList) => {
+        if (cancelled) return;
+        setPeriods(pList);
+        const targetP =
+          selectedPeriod && pList.includes(selectedPeriod)
+            ? selectedPeriod
+            : pList[0] || "";
+        if (targetP !== selectedPeriod) {
+          setSelectedPeriod(targetP);
+        }
+        const cat = await getPeriodCatalog(
+          selectedSede,
+          selectedJornada,
+          targetP || undefined
+        );
+        if (!cancelled) {
+          setPeriodCatalog(cat.courses);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
     return () => {
       cancelled = true;
     };
-  }, [selectedSede, selectedJornada]);
+  }, [selectedSede, selectedJornada, selectedPeriod]);
 
   const enrolledSiglas = React.useMemo(
     () => Object.keys(inProgressCourses),
     [inProgressCourses]
   );
 
-  // Load parallels for all enrolled courses
+  // Load parallels and professor reviews for all enrolled courses
   React.useEffect(() => {
     let cancelled = false;
     if (enrolledSiglas.length === 0) {
@@ -122,8 +175,27 @@ export function SemesterScheduleView() {
             nextMap[sigla] = list;
           })
         );
+        if (cancelled) return;
+        setParallelsByCourse(nextMap);
+
+        // Fetch professor ratings for all professors in these parallels
+        const allProfs = Array.from(
+          new Set(
+            Object.values(nextMap)
+              .flat()
+              .flatMap((p) => p.profesor || [])
+          )
+        ).filter((name) => name && !name.includes("DEFINIR"));
+
+        const revMap: Record<string, ProfessorReviewSummary> = {};
+        await Promise.all(
+          allProfs.map(async (profName) => {
+            const rev = await getProfessorReview(profName);
+            if (rev) revMap[profName] = rev;
+          })
+        );
         if (!cancelled) {
-          setParallelsByCourse(nextMap);
+          setProfReviews((prev) => ({ ...prev, ...revMap }));
         }
       } finally {
         if (!cancelled) {
@@ -138,38 +210,113 @@ export function SemesterScheduleView() {
     };
   }, [enrolledSiglas, selectedSede, selectedJornada, selectedPeriod]);
 
-  // Quick search suggestions from current curriculum
-  const searchSuggestions = React.useMemo(() => {
-    const q = quickAddSearch.trim().toLowerCase();
+  // Global search across both active Malla and full SIGA Period Catalog (including professor names!)
+  const searchResults = React.useMemo(() => {
+    const q = globalSearch.trim().toLowerCase();
     if (!q) return [];
-    return curriculum.ramos
-      .filter(
-        (r) =>
-          !inProgressCourses[r.sigla] &&
-          (r.sigla.toLowerCase().includes(q) ||
-            r.nombre.toLowerCase().includes(q))
-      )
-      .slice(0, 6);
-  }, [quickAddSearch, curriculum.ramos, inProgressCourses]);
 
-  // Build grid cells: key = `${dia}-${pair}` (e.g. "0-1-2")
-  const { gridMap, conflicts, hasSaturday } = React.useMemo(() => {
+    const results: Array<{
+      sigla: string;
+      nombre: string;
+      departamento: string;
+      inMalla: boolean;
+      matchedProf?: string;
+      matchedParallel?: string;
+      parallelsCount: number;
+    }> = [];
+
+    const seen = new Set<string>();
+
+    // 1. Search in SIGA period catalog (has real parallels & professors)
+    for (const item of periodCatalog) {
+      const matchSigla =
+        item.sigla.toLowerCase().includes(q) ||
+        item.rawSigla.toLowerCase().includes(q);
+      const matchName = item.nombre.toLowerCase().includes(q);
+      const matchDepto = item.departamento.toLowerCase().includes(q);
+      const matchingParByProf = item.parallels.find((p) =>
+        (p.profesor || []).some((prof) => prof.toLowerCase().includes(q))
+      );
+
+      if (matchSigla || matchName || matchDepto || matchingParByProf) {
+        const inMalla = curriculum.ramos.some(
+          (r) => r.sigla.toUpperCase() === item.sigla.toUpperCase()
+        );
+        seen.add(item.sigla.toUpperCase());
+        results.push({
+          sigla: item.sigla,
+          nombre: item.nombre,
+          departamento: item.departamento,
+          inMalla,
+          matchedProf: matchingParByProf
+            ? matchingParByProf.profesor.join(" / ")
+            : undefined,
+          matchedParallel: matchingParByProf?.paralelo,
+          parallelsCount: item.parallels.length,
+        });
+      }
+      if (results.length >= 10) break;
+    }
+
+    // 2. Also include matching courses from active Malla if not already in results
+    if (results.length < 10) {
+      for (const r of curriculum.ramos) {
+        if (seen.has(r.sigla.toUpperCase())) continue;
+        if (
+          r.sigla.toLowerCase().includes(q) ||
+          r.nombre.toLowerCase().includes(q)
+        ) {
+          results.push({
+            sigla: r.sigla,
+            nombre: r.nombre,
+            departamento: r.departamento || r.area,
+            inMalla: true,
+            parallelsCount: 0,
+          });
+        }
+        if (results.length >= 10) break;
+      }
+    }
+
+    return results;
+  }, [globalSearch, periodCatalog, curriculum.ramos]);
+
+  // Build grid cells (including live hover preview) & calculate block stats
+  const {
+    gridMap,
+    conflicts,
+    hasSaturday,
+    totalIndividualBlocks,
+    activeDaysCount,
+    assignedCoursesCount,
+  } = React.useMemo(() => {
     const map: Record<string, ScheduledCellEntry[]> = {};
     let saturdayUsed = false;
+    const uniqueDayBlockSet = new Set<string>();
+    const activeDaysSet = new Set<number>();
+    let assignedCount = 0;
 
-    for (const sigla of enrolledSiglas) {
+    enrolledSiglas.forEach((sigla, idx) => {
       const config = inProgressCourses[sigla];
       const parId = config?.selectedParallel;
-      if (!parId) continue;
+      if (!parId) return;
 
       const parList = parallelsByCourse[sigla] || [];
       const chosenPar = parList.find((p) => p.paralelo === parId);
-      if (!chosenPar || !chosenPar.horario) continue;
+      if (!chosenPar || !chosenPar.horario) return;
 
+      assignedCount++;
       const courseObj = curriculum.ramos.find((r) => r.sigla === sigla);
       const areaColor =
-        (courseObj && curriculum.areas[courseObj.area]?.color) || "#002B49";
-      const courseName = courseObj?.nombre || chosenPar.nombre || sigla;
+        (courseObj && curriculum.areas[courseObj.area]?.color) ||
+        COURSE_PALETTE[idx % COURSE_PALETTE.length];
+      const courseName =
+        courseObj?.nombre || config?.customName || chosenPar.nombre || sigla;
+
+      for (const b of chosenPar.horario) {
+        uniqueDayBlockSet.add(`${b.dia}-${b.bloque}`);
+        activeDaysSet.add(b.dia);
+      }
 
       for (const pairObj of USM_BLOCK_PAIRS) {
         for (let dia = 0; dia < 6; dia++) {
@@ -180,8 +327,7 @@ export function SemesterScheduleView() {
             if (dia === 5) saturdayUsed = true;
             const cellKey = `${dia}-${pairObj.pair}`;
             if (!map[cellKey]) map[cellKey] = [];
-            // Avoid duplicate entry for the same course in the same pair
-            if (!map[cellKey].some((e) => e.sigla === sigla)) {
+            if (!map[cellKey].some((e) => e.sigla === sigla && !e.isPreview)) {
               map[cellKey].push({
                 sigla,
                 nombre: courseName,
@@ -191,6 +337,45 @@ export function SemesterScheduleView() {
                 profesor:
                   chosenPar.profesor?.join(", ") || matchingBlock.profesor,
                 color: areaColor,
+                isPreview: false,
+              });
+            }
+          }
+        }
+      }
+    });
+
+    // Inject hoveredPreview blocks if the user is hovering a parallel
+    if (hoveredPreview && hoveredPreview.parallel.horario) {
+      const { sigla, parallel } = hoveredPreview;
+      const currentSelected = inProgressCourses[sigla]?.selectedParallel;
+      if (currentSelected !== parallel.paralelo) {
+        const courseObj = curriculum.ramos.find((r) => r.sigla === sigla);
+        const courseName =
+          courseObj?.nombre ||
+          inProgressCourses[sigla]?.customName ||
+          parallel.nombre ||
+          sigla;
+
+        for (const pairObj of USM_BLOCK_PAIRS) {
+          for (let dia = 0; dia < 6; dia++) {
+            const matchingBlock = parallel.horario.find(
+              (b) => b.dia === dia && pairObj.blocks.includes(b.bloque)
+            );
+            if (matchingBlock) {
+              if (dia === 5) saturdayUsed = true;
+              const cellKey = `${dia}-${pairObj.pair}`;
+              if (!map[cellKey]) map[cellKey] = [];
+              map[cellKey].push({
+                sigla,
+                nombre: courseName,
+                paralelo: parallel.paralelo,
+                tipo: matchingBlock.tipo,
+                sala: matchingBlock.sala,
+                profesor:
+                  parallel.profesor?.join(", ") || matchingBlock.profesor,
+                color: "#D99B00",
+                isPreview: true,
               });
             }
           }
@@ -205,12 +390,13 @@ export function SemesterScheduleView() {
     }> = [];
 
     for (const [key, entries] of Object.entries(map)) {
-      if (entries.length > 1) {
+      const nonPreviewEntries = entries.filter((e) => !e.isPreview);
+      if (nonPreviewEntries.length > 1) {
         const [diaStr, ...pairParts] = key.split("-");
         conflictList.push({
           dia: Number(diaStr),
           pair: pairParts.join("-"),
-          entries,
+          entries: nonPreviewEntries,
         });
       }
     }
@@ -219,8 +405,17 @@ export function SemesterScheduleView() {
       gridMap: map,
       conflicts: conflictList,
       hasSaturday: saturdayUsed,
+      totalIndividualBlocks: uniqueDayBlockSet.size,
+      activeDaysCount: activeDaysSet.size,
+      assignedCoursesCount: assignedCount,
     };
-  }, [enrolledSiglas, inProgressCourses, parallelsByCourse, curriculum]);
+  }, [
+    enrolledSiglas,
+    inProgressCourses,
+    parallelsByCourse,
+    curriculum,
+    hoveredPreview,
+  ]);
 
   // Auto-select conflict-free parallels for enrolled courses
   const handleAutoAssignParallels = () => {
@@ -230,7 +425,6 @@ export function SemesterScheduleView() {
       const parList = parallelsByCourse[sigla] || [];
       if (parList.length === 0) continue;
 
-      // Try to find a parallel whose (dia, bloque) blocks don't collide with occupied
       let bestPar = parList[0];
       for (const candidate of parList) {
         const hasCollision = (candidate.horario || []).some((b) =>
@@ -250,6 +444,10 @@ export function SemesterScheduleView() {
   };
 
   const visibleDays = hasSaturday ? [0, 1, 2, 3, 4, 5] : [0, 1, 2, 3, 4];
+  const weeklyChronologicalHours = (
+    (totalIndividualBlocks * 35) /
+    60
+  ).toFixed(1);
 
   return (
     <div className="space-y-5">
@@ -260,10 +458,10 @@ export function SemesterScheduleView() {
             <div>
               <CardTitle className="text-lg sm:text-xl flex items-center gap-2">
                 <Calendar className="h-5 w-5 text-[#D99B00]" />
-                <span>Planificador de Horario Semestral SIGA</span>
+                <span>Calculadora de Horario y Bloques SIGA USM</span>
               </CardTitle>
               <CardDescription className="text-xs sm:text-sm">
-                Selecciona tus paralelos para simular tu horario semanal, verificar salas, profesores y detectar topes de bloques.
+                Elige profesor y paralelo para calcular tus bloques semanales, previsualizar horarios al pasar el mouse y detectar topes automáticamente.
               </CardDescription>
             </div>
 
@@ -327,91 +525,179 @@ export function SemesterScheduleView() {
         </CardHeader>
 
         <CardContent className="pt-0 space-y-3">
-          {/* Quick Add Course Input */}
-          <div className="relative max-w-md">
-            <Input
-              placeholder="Agregar asignatura al semestre (ej. INF-253, MAT-022, Física)..."
-              value={quickAddSearch}
-              onChange={(e) => setQuickAddSearch(e.target.value)}
-              className="h-8 text-xs"
-            />
-            {searchSuggestions.length > 0 && (
-              <div className="absolute z-20 mt-1 w-full rounded-md border bg-popover shadow-md p-1 space-y-0.5">
-                {searchSuggestions.map((course) => (
-                  <button
-                    key={course.sigla}
-                    type="button"
-                    onClick={() => {
-                      enrollCourse(course.sigla);
-                      setQuickAddSearch("");
-                    }}
-                    className="w-full text-left px-2.5 py-1.5 rounded text-xs hover:bg-muted flex items-center justify-between"
-                  >
-                    <span>
-                      <strong className="font-mono">{course.sigla}</strong> —{" "}
-                      {course.nombre}
-                    </span>
-                    <Plus className="h-3.5 w-3.5 text-[#D99B00]" />
-                  </button>
-                ))}
-              </div>
-            )}
+          {/* Dual Enrollment Bar: Button for Malla Modal + Global SIGA Search */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+            <Button
+              type="button"
+              variant="usm"
+              size="sm"
+              onClick={() => setEnrollModalOpen(true)}
+              className="h-9 px-3.5 text-xs font-semibold gap-1.5 shrink-0"
+            >
+              <GraduationCap className="h-4 w-4 text-[#D99B00]" />
+              <span>Inscribir desde mi Malla (Disponibles / Bloqueados)</span>
+            </Button>
+
+            <div className="relative flex-1">
+              <Search className="h-4 w-4 absolute left-3 top-2.5 text-muted-foreground" />
+              <Input
+                placeholder="Buscar en catálogo SIGA por ramo, sigla, departamento o nombre de profesor..."
+                value={globalSearch}
+                onChange={(e) => setGlobalSearch(e.target.value)}
+                className="pl-9 h-9 text-xs"
+              />
+              {searchResults.length > 0 && (
+                <div className="absolute z-30 mt-1 w-full rounded-lg border bg-popover shadow-xl p-1.5 space-y-1 max-h-72 overflow-y-auto">
+                  {searchResults.map((item) => (
+                    <button
+                      key={item.sigla}
+                      type="button"
+                      onClick={() => {
+                        enrollCourse(item.sigla, {
+                          customName: item.nombre,
+                          selectedParallel: item.matchedParallel,
+                        });
+                        setGlobalSearch("");
+                      }}
+                      className="w-full text-left px-2.5 py-2 rounded-md text-xs hover:bg-muted flex items-center justify-between gap-2 transition-colors"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <strong className="font-mono">{item.sigla}</strong>
+                          <span className="font-medium truncate">
+                            {item.nombre}
+                          </span>
+                          {item.inMalla ? (
+                            <Badge variant="secondary" className="text-[9px]">
+                              En tu Malla
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-[9px]">
+                              {item.departamento}
+                            </Badge>
+                          )}
+                        </div>
+                        {item.matchedProf && (
+                          <div className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5">
+                            Dictado por: <strong>{item.matchedProf}</strong>{" "}
+                            (Par. {item.matchedParallel})
+                          </div>
+                        )}
+                      </div>
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#002B49] dark:text-[#D99B00] shrink-0">
+                        <Plus className="h-3.5 w-3.5" />
+                        Agregar
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Conflict Detection Status Banner */}
+          {/* Calculated Schedule Summary KPIs */}
           {enrolledSiglas.length > 0 && (
-            <div
-              className={`p-2.5 rounded-lg border text-xs flex items-start gap-2.5 ${
-                conflicts.length > 0
-                  ? "border-destructive/50 bg-destructive/10 text-destructive"
-                  : "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-              }`}
-            >
-              {conflicts.length > 0 ? (
-                <>
-                  <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-                  <div>
-                    <div className="font-bold">
-                      ¡Se detectaron {conflicts.length} tope(s) de horario!
-                    </div>
-                    <ul className="mt-1 space-y-0.5 list-disc list-inside">
-                      {conflicts.map((c, idx) => (
-                        <li key={idx}>
-                          <strong>
-                            {USM_BAR_DAYS[c.dia]} Bloque {c.pair}:
-                          </strong>{" "}
-                          {c.entries
-                            .map((e) => `${e.sigla} (Par. ${e.paralelo})`)
-                            .join(" choca con ")}
-                        </li>
-                      ))}
-                    </ul>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+              <div className="p-2.5 rounded-lg border bg-muted/20 flex items-center justify-between">
+                <div>
+                  <div className="text-[10px] uppercase font-semibold text-muted-foreground">
+                    Paralelos Elegidos
                   </div>
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-semibold">
-                      Horario limpio sin topes de bloques.
-                    </span>{" "}
-                    Todos los paralelos seleccionados son compatibles entre sí.
+                  <div className="text-sm font-black text-foreground">
+                    {assignedCoursesCount} / {enrolledSiglas.length} ramos
                   </div>
-                </>
-              )}
+                </div>
+                <Users className="h-4 w-4 text-[#D99B00]" />
+              </div>
+
+              <div className="p-2.5 rounded-lg border bg-muted/20 flex items-center justify-between">
+                <div>
+                  <div className="text-[10px] uppercase font-semibold text-muted-foreground">
+                    Bloques Calculados
+                  </div>
+                  <div className="text-sm font-black text-foreground">
+                    {totalIndividualBlocks} bloques{" "}
+                    <span className="text-[11px] font-normal text-muted-foreground">
+                      ({weeklyChronologicalHours} hrs)
+                    </span>
+                  </div>
+                </div>
+                <Clock className="h-4 w-4 text-sky-500" />
+              </div>
+
+              <div className="p-2.5 rounded-lg border bg-muted/20 flex items-center justify-between">
+                <div>
+                  <div className="text-[10px] uppercase font-semibold text-muted-foreground">
+                    Días en Campus
+                  </div>
+                  <div className="text-sm font-black text-foreground">
+                    {activeDaysCount}{" "}
+                    {activeDaysCount === 1 ? "día / sem" : "días / sem"}
+                  </div>
+                </div>
+                <Calendar className="h-4 w-4 text-emerald-500" />
+              </div>
+
+              <div
+                className={`p-2.5 rounded-lg border flex items-center justify-between ${
+                  conflicts.length > 0
+                    ? "border-destructive/50 bg-destructive/10 text-destructive"
+                    : "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                }`}
+              >
+                <div>
+                  <div className="text-[10px] uppercase font-semibold opacity-80">
+                    Estado de Topes
+                  </div>
+                  <div className="text-sm font-black">
+                    {conflicts.length === 0
+                      ? "Sin Topes ✓"
+                      : `${conflicts.length} Tope(s)`}
+                  </div>
+                </div>
+                {conflicts.length > 0 ? (
+                  <AlertTriangle className="h-4 w-4 shrink-0" />
+                ) : (
+                  <CheckCircle2 className="h-4 w-4 shrink-0" />
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Conflict Details List if any */}
+          {conflicts.length > 0 && (
+            <div className="p-2.5 rounded-lg border border-destructive/50 bg-destructive/10 text-destructive text-xs flex items-start gap-2.5">
+              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+              <div>
+                <div className="font-bold">
+                  Detalle de bloques en conflicto:
+                </div>
+                <ul className="mt-1 space-y-0.5 list-disc list-inside">
+                  {conflicts.map((c, idx) => (
+                    <li key={idx}>
+                      <strong>
+                        {USM_BAR_DAYS[c.dia]} Bloque {c.pair}:
+                      </strong>{" "}
+                      {c.entries
+                        .map((e) => `${e.sigla} (Par. ${e.paralelo})`)
+                        .join(" choca con ")}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </div>
           )}
         </CardContent>
       </Card>
 
-      {/* Main Layout: Course Parallel Picker + Weekly Calendar Grid */}
+      {/* Main Layout: Professor/Parallel Picker + Weekly Calendar Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* Left Column: Enrolled Courses & Parallel Selector */}
+        {/* Left Column: Enrolled Courses & Professor/Parallel Selector */}
         <div className="lg:col-span-4 space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
               <BookOpen className="h-4 w-4 text-[#002B49] dark:text-[#D99B00]" />
-              <span>Ramos Inscritos ({enrolledSiglas.length})</span>
+              <span>Elegir Profesor y Paralelo ({enrolledSiglas.length})</span>
             </h3>
             {loading && (
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
@@ -420,22 +706,37 @@ export function SemesterScheduleView() {
 
           {enrolledSiglas.length === 0 ? (
             <Card className="border-dashed">
-              <CardContent className="py-8 text-center space-y-2">
+              <CardContent className="py-8 text-center space-y-3">
                 <Calendar className="h-8 w-8 mx-auto text-muted-foreground/50" />
                 <p className="text-xs text-muted-foreground">
-                  No tienes asignaturas marcadas como <strong>Cursando</strong>.
-                  Agrégalas desde la Malla Curricular o usando el buscador superior.
+                  No tienes asignaturas en tu horario. Inscríbelas desde tu malla curricular o buscándolas en el catálogo SIGA.
                 </p>
+                <Button
+                  type="button"
+                  variant="usm"
+                  size="sm"
+                  onClick={() => setEnrollModalOpen(true)}
+                  className="text-xs gap-1.5"
+                >
+                  <Plus className="h-3.5 w-3.5 text-[#D99B00]" />
+                  <span>Inscribir desde mi Malla</span>
+                </Button>
               </CardContent>
             </Card>
           ) : (
-            enrolledSiglas.map((sigla) => {
+            enrolledSiglas.map((sigla, idx) => {
               const courseObj = curriculum.ramos.find((r) => r.sigla === sigla);
+              const enrolledCfg = inProgressCourses[sigla];
               const areaColor =
                 (courseObj && curriculum.areas[courseObj.area]?.color) ||
-                "#002B49";
+                COURSE_PALETTE[idx % COURSE_PALETTE.length];
               const parList = parallelsByCourse[sigla] || [];
-              const selectedParId = inProgressCourses[sigla]?.selectedParallel;
+              const selectedParId = enrolledCfg?.selectedParallel;
+              const displayName =
+                courseObj?.nombre ||
+                enrolledCfg?.customName ||
+                parList[0]?.nombre ||
+                sigla;
 
               return (
                 <Card key={sigla} className="overflow-hidden">
@@ -446,21 +747,25 @@ export function SemesterScheduleView() {
                   <CardHeader className="p-3 pb-2">
                     <div className="flex items-start justify-between gap-2">
                       <div>
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           <Badge
                             variant="outline"
                             className="font-mono text-[11px]"
                           >
                             {sigla}
                           </Badge>
-                          {selectedParId && (
+                          {selectedParId ? (
                             <Badge variant="default" className="text-[10px]">
-                              Par. {selectedParId}
+                              Paralelo {selectedParId}
+                            </Badge>
+                          ) : (
+                            <Badge variant="warning" className="text-[10px]">
+                              Elige paralelo
                             </Badge>
                           )}
                         </div>
                         <CardTitle className="text-xs sm:text-sm font-bold mt-1">
-                          {courseObj?.nombre || sigla}
+                          {displayName}
                         </CardTitle>
                       </div>
 
@@ -480,29 +785,40 @@ export function SemesterScheduleView() {
                   <CardContent className="p-3 pt-0 space-y-2">
                     {parList.length === 0 ? (
                       <p className="text-[11px] text-muted-foreground italic">
-                        Sin paralelos publicados en {selectedSede} ({selectedJornada}).
+                        Sin paralelos publicados en {selectedSede} (
+                        {selectedJornada} • {selectedPeriod}).
                       </p>
                     ) : (
-                      <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                      <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
                         {parList.map((par) => {
                           const isSelected = selectedParId === par.paralelo;
                           const groupedBlocks = groupScheduleBlocks(
                             par.horario || []
                           );
+                          const firstProf = par.profesor?.[0];
+                          const profRev = firstProf
+                            ? profReviews[firstProf]
+                            : undefined;
+
                           return (
                             <button
                               key={par.paralelo}
                               type="button"
-                              onClick={() =>
+                              onMouseEnter={() =>
+                                setHoveredPreview({ sigla, parallel: par })
+                              }
+                              onMouseLeave={() => setHoveredPreview(null)}
+                              onClick={() => {
+                                setHoveredPreview(null);
                                 setSelectedParallel(
                                   sigla,
                                   isSelected ? undefined : par.paralelo
-                                )
-                              }
+                                );
+                              }}
                               className={`w-full text-left p-2 rounded-md border text-[11px] transition-all ${
                                 isSelected
-                                  ? "border-[#002B49] bg-[#002B49]/10 dark:border-[#D99B00] dark:bg-[#D99B00]/15"
-                                  : "hover:border-muted-foreground/40 bg-card/50"
+                                  ? "border-[#002B49] bg-[#002B49]/10 dark:border-[#D99B00] dark:bg-[#D99B00]/15 ring-1 ring-[#002B49]/30 dark:ring-[#D99B00]/40"
+                                  : "hover:border-[#D99B00] bg-card/50"
                               }`}
                             >
                               <div className="flex items-center justify-between gap-1 font-semibold">
@@ -510,26 +826,51 @@ export function SemesterScheduleView() {
                                   <Users className="h-3 w-3 text-[#D99B00]" />
                                   <span>Paralelo {par.paralelo}</span>
                                 </span>
-                                <span className="text-[10px] text-muted-foreground">
-                                  Cupos: {par.cupo}
-                                </span>
+                                <div className="flex items-center gap-1.5">
+                                  {profRev?.stats.claridad_expositiva && (
+                                    <span
+                                      className="inline-flex items-center gap-0.5 text-[10px] text-amber-600 dark:text-amber-400 font-bold"
+                                      title="Claridad expositiva según evaluación estudiantil"
+                                    >
+                                      <Star className="h-2.5 w-2.5 fill-current" />
+                                      {profRev.stats.claridad_expositiva.avg.toFixed(
+                                        1
+                                      )}
+                                    </span>
+                                  )}
+                                  <span className="text-[10px] text-muted-foreground">
+                                    Cupos: {par.cupo}
+                                  </span>
+                                </div>
                               </div>
-                              <div className="text-muted-foreground truncate mt-0.5">
+
+                              <div className="text-foreground font-medium truncate mt-0.5">
                                 {par.profesor?.length
                                   ? par.profesor.join(" / ")
                                   : "Profesor por definir"}
                               </div>
-                              {groupedBlocks.length > 0 && (
-                                <div className="flex flex-wrap gap-1 mt-1">
-                                  {groupedBlocks.map((gb, idx) => (
+
+                              {groupedBlocks.length > 0 ? (
+                                <div className="flex flex-wrap gap-1 mt-1.5">
+                                  {groupedBlocks.map((gb, gIdx) => (
                                     <span
-                                      key={idx}
-                                      className="px-1.5 py-0.2 rounded bg-muted text-[10px] font-mono"
+                                      key={gIdx}
+                                      className="px-1.5 py-0.5 rounded bg-muted text-[10px] font-mono inline-flex items-center gap-1"
                                     >
-                                      {USM_BAR_DAYS[gb.dia]?.slice(0, 2)} B
-                                      {gb.bloqueRange} ({gb.tipo})
+                                      <strong>
+                                        {USM_BAR_DAYS[gb.dia]?.slice(0, 2)} B
+                                        {gb.bloqueRange}
+                                      </strong>
+                                      <span className="opacity-75">
+                                        ({gb.tipo}
+                                        {gb.sala ? ` • ${gb.sala}` : ""})
+                                      </span>
                                     </span>
                                   ))}
+                                </div>
+                              ) : (
+                                <div className="text-[10px] text-muted-foreground italic mt-1">
+                                  Sin bloques fijos en sala
                                 </div>
                               )}
                             </button>
@@ -584,33 +925,50 @@ export function SemesterScheduleView() {
                       {visibleDays.map((diaIdx) => {
                         const cellKey = `${diaIdx}-${pairObj.pair}`;
                         const entries = gridMap[cellKey] || [];
+                        const nonPreviewCount = entries.filter(
+                          (e) => !e.isPreview
+                        ).length;
                         const isConflict = entries.length > 1;
 
                         return (
                           <td
                             key={cellKey}
-                            className={`p-1.5 border-r last:border-r-0 align-top h-20 w-[18%] ${
+                            className={`p-1.5 border-r last:border-r-0 align-top h-20 w-[18%] transition-colors ${
                               isConflict ? "bg-destructive/10" : ""
                             }`}
                           >
                             <div className="space-y-1">
                               {entries.map((entry) => (
                                 <div
-                                  key={`${entry.sigla}-${entry.paralelo}`}
-                                  className={`p-1.5 rounded border text-[11px] leading-tight shadow-2xs ${
-                                    isConflict
+                                  key={`${entry.sigla}-${entry.paralelo}-${
+                                    entry.isPreview ? "prev" : "fixed"
+                                  }`}
+                                  className={`p-1.5 rounded border text-[11px] leading-tight shadow-2xs transition-all ${
+                                    entry.isPreview
+                                      ? isConflict
+                                        ? "border-dashed border-2 border-destructive bg-destructive/20 animate-pulse"
+                                        : "border-dashed border-2 border-[#D99B00] bg-[#D99B00]/15"
+                                      : nonPreviewCount > 1
                                       ? "border-destructive bg-destructive/15"
                                       : "bg-card"
                                   }`}
-                                  style={{
-                                    borderLeftWidth: "4px",
-                                    borderLeftColor: isConflict
-                                      ? "#EF4444"
-                                      : entry.color,
-                                  }}
+                                  style={
+                                    !entry.isPreview
+                                      ? {
+                                          borderLeftWidth: "4px",
+                                          borderLeftColor:
+                                            nonPreviewCount > 1
+                                              ? "#EF4444"
+                                              : entry.color,
+                                        }
+                                      : undefined
+                                  }
                                 >
                                   <div className="flex items-center justify-between gap-1 font-bold">
-                                    <span className="font-mono">
+                                    <span className="font-mono flex items-center gap-1">
+                                      {entry.isPreview && (
+                                        <Eye className="h-3 w-3 text-[#D99B00]" />
+                                      )}
                                       {entry.sigla}
                                     </span>
                                     <span className="text-[10px] px-1 rounded bg-muted font-normal">
@@ -618,14 +976,21 @@ export function SemesterScheduleView() {
                                     </span>
                                   </div>
                                   <div className="text-[10px] text-muted-foreground truncate mt-0.5">
-                                    {entry.nombre}
+                                    {entry.profesor || entry.nombre}
                                   </div>
-                                  {entry.sala && (
-                                    <div className="text-[10px] font-semibold text-foreground flex items-center gap-0.5 mt-0.5">
-                                      <MapPin className="h-2.5 w-2.5 text-[#D99B00]" />
-                                      <span>{entry.sala}</span>
-                                    </div>
-                                  )}
+                                  <div className="flex items-center justify-between gap-1 mt-0.5">
+                                    {entry.sala && (
+                                      <span className="text-[10px] font-semibold text-foreground flex items-center gap-0.5">
+                                        <MapPin className="h-2.5 w-2.5 text-[#D99B00]" />
+                                        <span>{entry.sala}</span>
+                                      </span>
+                                    )}
+                                    {entry.isPreview && isConflict && (
+                                      <span className="text-[9px] font-bold text-destructive uppercase">
+                                        ¡Tope!
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                               ))}
                             </div>
@@ -640,6 +1005,12 @@ export function SemesterScheduleView() {
           </Card>
         </div>
       </div>
+
+      {/* Shared Enrollment Modal filtered by Malla states */}
+      <EnrollCourseModal
+        open={enrollModalOpen}
+        onOpenChange={setEnrollModalOpen}
+      />
     </div>
   );
 }
