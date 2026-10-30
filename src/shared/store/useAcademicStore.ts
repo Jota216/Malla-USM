@@ -484,7 +484,9 @@ export const useAcademicStore = create<AcademicStoreState>()(
           return false;
         }
 
+        const nextPlanId = res.data.activePlanId || get().activePlanId;
         set({
+          activePlanId: nextPlanId,
           approvedCourses: res.data.approvedCourses,
           inProgressCourses: res.data.inProgressCourses,
           milestones:
@@ -492,11 +494,24 @@ export const useAcademicStore = create<AcademicStoreState>()(
               ? res.data.milestones
               : DEFAULT_GRADUATION_MILESTONES,
         });
+
+        if (res.data.activePlanId && res.data.activePlanId !== get().curriculum.codigo_plan) {
+          curriculumService
+            .getCurriculum(res.data.activePlanId)
+            .then((plan) => {
+              useAcademicStore.setState({ curriculum: plan });
+            })
+            .catch(() => {
+              // Keeps current curriculum if offline
+            });
+        }
+
         return true;
       },
 
       exportJSON: (): string => {
         return sigaService.exportBackup({
+          activePlanId: get().activePlanId,
           approvedCourses: get().approvedCourses,
           inProgressCourses: get().inProgressCourses,
           milestones: get().milestones,

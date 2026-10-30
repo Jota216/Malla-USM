@@ -23,7 +23,7 @@ export function AnalyticsDashboard() {
   const ramos = curriculum.ramos || [];
   const areas = curriculum.areas || {};
 
-  // Check if semesters 1-4 and 1-8 are fully approved automatically
+  // Check if semesters 1-4 (Bachiller) and Licenciatura (SIGA requisito_licenciatura or sem 1-8) are completed
   const sem1to4Complete = React.useMemo(() => {
     const sem1to4 = ramos.filter((r) => r.semestre <= 4);
     return (
@@ -32,12 +32,23 @@ export function AnalyticsDashboard() {
     );
   }, [ramos, approvedCourses]);
 
-  const sem1to8Complete = React.useMemo(() => {
-    const sem1to8 = ramos.filter((r) => r.semestre <= 8);
-    return (
-      sem1to8.length > 0 &&
-      sem1to8.every((r) => !!approvedCourses[r.sigla.toUpperCase()])
-    );
+  const licenciaturaStatus = React.useMemo(() => {
+    const explicitLicCourses = ramos.filter((r) => r.requisito_licenciatura === true);
+    const targetCourses =
+      explicitLicCourses.length > 0
+        ? explicitLicCourses
+        : ramos.filter((r) => r.semestre <= 8);
+
+    const approvedCount = targetCourses.filter(
+      (r) => !!approvedCourses[r.sigla.toUpperCase()]
+    ).length;
+
+    return {
+      total: targetCourses.length,
+      approved: approvedCount,
+      isComplete: targetCourses.length > 0 && approvedCount === targetCourses.length,
+      usesExplicitSigaFlag: explicitLicCourses.length > 0,
+    };
   }, [ramos, approvedCourses]);
 
   // Distribution by Knowledge Area
@@ -86,11 +97,13 @@ export function AnalyticsDashboard() {
       }
     }
 
-    return Object.entries(data).map(([code, d]) => ({
-      code,
-      ...d,
-      percent: d.totalSct > 0 ? (d.approvedSct / d.totalSct) * 100 : 0,
-    }));
+    return Object.entries(data)
+      .filter(([, d]) => d.totalCourses > 0)
+      .map(([code, d]) => ({
+        code,
+        ...d,
+        percent: d.totalSct > 0 ? (d.approvedSct / d.totalSct) * 100 : 0,
+      }));
   }, [ramos, areas, approvedCourses]);
 
   // Semester Pace Estimator: standard load is 30 SCT/semester
@@ -225,30 +238,38 @@ export function AnalyticsDashboard() {
       {/* Graduation Milestones & Degree Requirements Checklist */}
       <Card className="shadow-xs">
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2">
               <GraduationCap className="h-5 w-5 text-secondary" />
               <div>
                 <CardTitle className="text-base font-bold">
-                  Requisitos de Titulación USM
+                  Requisitos de Titulación USM — {curriculum.carrera}
                 </CardTitle>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Lista de verificación oficial para la obtención de grados académicos y título profesional
+                  Lista de verificación oficial para la obtención de grados académicos y título profesional (Plan {curriculum.plan})
                 </p>
               </div>
             </div>
             <Badge variant="outline" className="text-xs font-semibold">
-              {milestones.filter((m) => m.completed).length} / {milestones.length} cumplidos
+              {
+                milestones.filter(
+                  (m) =>
+                    m.completed ||
+                    (m.id === "milestone-bachiller" && sem1to4Complete) ||
+                    (m.id === "milestone-licenciatura" && licenciaturaStatus.isComplete)
+                ).length
+              }{" "}
+              / {milestones.length} cumplidos
             </Badge>
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {milestones.map((milestone) => {
-              // Check if auto-completed via curriculum
               const isAutoCompleted =
                 (milestone.id === "milestone-bachiller" && sem1to4Complete) ||
-                (milestone.id === "milestone-licenciatura" && sem1to8Complete);
+                (milestone.id === "milestone-licenciatura" &&
+                  licenciaturaStatus.isComplete);
 
               const isChecked = milestone.completed || isAutoCompleted;
 
@@ -272,7 +293,9 @@ export function AnalyticsDashboard() {
                       <Label
                         htmlFor={milestone.id}
                         className={`text-xs font-bold cursor-pointer ${
-                          isChecked ? "text-emerald-700 dark:text-emerald-400" : "text-foreground"
+                          isChecked
+                            ? "text-emerald-700 dark:text-emerald-400"
+                            : "text-foreground"
                         }`}
                       >
                         {milestone.title}
@@ -284,6 +307,12 @@ export function AnalyticsDashboard() {
                     <p className="text-[11px] text-muted-foreground leading-relaxed">
                       {milestone.description}
                     </p>
+                    {milestone.id === "milestone-licenciatura" && (
+                      <div className="text-[10px] font-mono text-muted-foreground pt-0.5">
+                        Avance Licenciatura SIGA: {licenciaturaStatus.approved} /{" "}
+                        {licenciaturaStatus.total} asignaturas requeridas
+                      </div>
+                    )}
                     {isAutoCompleted && (
                       <span className="inline-block text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
                         ✓ Verificado automáticamente por avance de malla
@@ -307,7 +336,9 @@ export function AnalyticsDashboard() {
                 Distribución por Área de Conocimiento
               </CardTitle>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Progreso y créditos SCT acumulados por cada eje curricular del Plan 2014
+                Progreso y créditos SCT acumulados por eje curricular en{" "}
+                <strong>{curriculum.carrera}</strong> (Plan {curriculum.plan}
+                {curriculum.sede ? ` • ${curriculum.sede}` : ""})
               </p>
             </div>
           </div>

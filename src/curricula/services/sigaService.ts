@@ -490,12 +490,13 @@ class SigaService {
   }
 
   exportBackup(payload: {
+    activePlanId?: string;
     approvedCourses: Record<string, ApprovedCourseRecord>;
     inProgressCourses: Record<string, EnrolledCourseConfig>;
     milestones: GraduationMilestone[];
   }): string {
     const backupData = {
-      version: '1.1.0',
+      version: '1.2.0',
       exportedAt: new Date().toISOString(),
       system: 'Sansano Academic Tracker - USM',
       data: payload,
@@ -506,6 +507,7 @@ class SigaService {
   importBackup(rawJson: string): {
     success: boolean;
     data?: {
+      activePlanId?: string;
       approvedCourses: Record<string, ApprovedCourseRecord>;
       inProgressCourses: Record<string, EnrolledCourseConfig>;
       milestones: GraduationMilestone[];
@@ -526,6 +528,7 @@ class SigaService {
       return {
         success: true,
         data: {
+          activePlanId: typeof data.activePlanId === 'string' ? data.activePlanId : undefined,
           approvedCourses: data.approvedCourses || {},
           inProgressCourses: data.inProgressCourses || {},
           milestones: Array.isArray(data.milestones) ? data.milestones : [],
