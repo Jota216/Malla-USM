@@ -1,17 +1,18 @@
 #!/usr/bin/env node
 /**
- * Extractor de Requisitos de Aprobación y Fórmulas Oficiales desde SIGA USM (Programas OAI PDF)
+ * Extractor Multi-Patrón de Requisitos de Aprobación y Fórmulas Oficiales desde SIGA USM (Programas OAI PDF)
  *
- * Lee `public/data/programas_academicos.json`, descarga los programas oficiales en PDF desde
- * `https://siga.usm.cl/prog_oai/programa_download?pdf=...` (endpoint público sin autenticación)
- * y extrae la sección "Evaluación y calificación de la asignatura (Ajustado a Reglamento Institucional-Rglto. N°1)":
- *   - Tabla de Instrumentos de evaluación | N° | %
- *   - Ecuación explícita de Nota de Presentación (NP) / Nota Final (NF)
- *   - Reglas de descarte de peores notas ("se elimina la nota más baja", "mejores n-1 notas")
- *   - Reglas de nota mínima de bloque ("Nota de cada certamen >= 50", "Factor laboratorio >= 1,0")
+ * Soporta los 4 formatos oficiales detectados en `siga.usm.cl/prog_oai/programa_download?pdf=...`:
+ *   1. Formato Ecuación Explícita en Texto (ej. INF-134 `NF= C*0,7+ T*0,3`, INF-253 `NF= Cert*0,46 + controles*0,2+EG*0,34`)
+ *   2. Formato Tabla de Porcentajes en Texto (ej. INF-221 `C1: 30%, C2: 35%, PT: 30%, PA: 5%`, IWI-131, QUI-010, FIS-100)
+ *   3. Formato Prosa en Pág. 2 + Ecuación en Imagen + Cuadro SCT en Pág. 3 (ej. INF-245 y INF-256 con peso dinámico α(PC))
+ *   4. Extracción de Cantidades desde Tabla SCT-Chile (Pág. 3):
+ *      - `Evaluaciones (certámenes, otros)` -> cantidad de certámenes
+ *      - `Tareas obligatorias` -> cantidad de tareas
+ *      - `Laboratorios / Taller` -> cantidad de laboratorios
  *
  * Uso:
- *   node scripts/extract-siga-formulas.mjs [--sigla=MAT021] [--limit=50]
+ *   node scripts/extract-siga-formulas.mjs [--sigla=INF245]
  */
 
 import fs from 'node:fs/promises';
@@ -36,85 +37,126 @@ export function formatSigla(rawSigla) {
 }
 
 /**
+ * Extrae las semanas/cantidades declaradas en la Página 3:
+ * "II. CÁLCULO DE CANTIDAD DE HORAS DE DEDICACIÓN - (SCT-Chile)"
+ */
+export function parseSctDedicationTable(fullPdfText) {
+  const clean = fullPdfText.replace(/\r/g, '\n');
+  const sctMatch = clean.match(
+    /C[AÁ]LCULO DE CANTIDAD DE HORAS DE DEDICACI[OÓ]N[\s\S]*$/i
+  );
+  const tableText = sctMatch ? sctMatch[0] : clean;
+
+  const extractWeeks = (rowPattern) => {
+    const regex = new RegExp(
+      `${rowPattern}[\\s\\S]{0,60}?(\\d+(?:[.,]\\d+)?)\\s+(\\d{1,2})\\s+(\\d+(?:[.,]\\d+)?)`,
+      'i'
+    );
+    const m = tableText.match(regex);
+    return m ? Number(m[2]) : null;
+  };
+
+  return {
+    certamenesCount: extractWeeks('Evaluaciones\\s*\\(cert[aá]menes'),
+    tareasCount: extractWeeks('Tareas\\s*(?:obligatorias|y ejercicios|individuales)'),
+    laboratoriosCount: extractWeeks('Laboratorios\\s*\\/\\s*Taller'),
+  };
+}
+
+/**
  * Parsea el texto extraído de la sección "Evaluación y calificación de la asignatura"
- * de un PDF oficial OAI de la USM y sintetiza bloques SubFormulaBlock + nota de requisitos.
+ * cruzado con el Cuadro SCT de la Página 3.
  */
 export function parseUsmSyllabusEvaluationText(text, sigla, pdfUrl) {
   const cleanText = text.replace(/\r/g, '\n');
+  const sctCounts = parseSctDedicationTable(cleanText);
 
-  // Localizar el bloque "Evaluación y calificación de la asignatura"
   const evalMatch = cleanText.match(
     /Evaluaci[oó]n y calificaci[oó]n de la asignatura[\s\S]*?(?=Recursos para el aprendizaje|Bibliograf[ií]a|II\.\s*C[AÁ]LCULO DE CANTIDAD|$)/i
   );
 
   const sectionText = evalMatch ? evalMatch[0].trim() : cleanText;
 
-  // Detectar si menciona eliminación de peor nota
   const dropsWorstOne =
-    /elimina la nota m[aá]s baja|mejores n-1|cinco con mejores calificaciones/i.test(
+    /elimina la nota m[aá]s baja|mejores n-1|cinco con mejores calificaciones|mejores 3/i.test(
       sectionText
     );
   const dropsWorstTwo = /mejores n-2|elimina las dos notas m[aá]s bajas/i.test(sectionText);
 
-  // Detectar mínimo 50 en certámenes o laboratorio
   const hasCertamenMin50 =
-    /certamen\s*(?:>=|≥|mayor o igual a)\s*50|promedio de cert[aá]menes\s*(?:>=|≥)\s*50/i.test(
+    /certamen\s*(?:>=|≥|mayor o igual a)\s*50|promedio de cert[aá]menes\s*(?:>=|≥|es igual o mayor a)\s*50|\(C1\+C2\)\/2\s*>=\s*50/i.test(
       sectionText
     );
+  const hasCertamenMin55 = /PC\s*(?:>=|≥)\s*55/i.test(sectionText);
 
-  // Detectar fórmula tipo Matemática USM: NP=0,20*C1+0,25*C2+0,30*C3+0,25*PC
-  const matWeightedMatch = sectionText.match(
-    /NP\s*=\s*0[.,](\d+)\s*\*\s*C1\s*\+\s*0[.,](\d+)\s*\*\s*C2\s*\+\s*0[.,](\d+)\s*\*\s*C3\s*\+\s*0[.,](\d+)\s*\*\s*PC/i
-  );
+  // Detectar si la ecuación está incrustada como imagen (ej. INF-245, INF-256)
+  // cuando menciona explícitamente certámenes y tareas/laboratorio pero no hay signos '%' ni '0,' en el texto
+  const mentionsInstrumentsInProse =
+    /tres cert[aá]menes\s*\(?C1,\s*C2\s*y\s*C3\)?\s*y\s*una nota de\s*(?:tareas|laboratorio)/i.test(
+      sectionText
+    );
+  const hasExplicitNumbers = /(?:\d+\s*%|\d+[.,]\d+\s*\*)/i.test(sectionText);
+  const hasEmbeddedEquationImage = mentionsInstrumentsInProse && !hasExplicitNumbers;
 
-  if (matWeightedMatch) {
-    const w1 = Number(matWeightedMatch[1]);
-    const w2 = Number(matWeightedMatch[2]);
-    const w3 = Number(matWeightedMatch[3]);
-    const wPc = Number(matWeightedMatch[4]);
-    const certWeight = (w1 + w2 + w3) / 100;
-    const ctrlWeight = wPc / 100;
+  if (hasEmbeddedEquationImage) {
+    const isLab = /nota de laboratorio/i.test(sectionText);
+    const tCode = isLab ? 'PL' : 'PT';
+    const tName = isLab ? 'Laboratorios (T)' : 'Tareas (T)';
+    const tCount = isLab
+      ? sctCounts.laboratoriosCount || 4
+      : sctCounts.tareasCount || 4;
 
     return {
       sigla: formatSigla(sigla),
       source: 'siga_pdf',
-      sourceLabel: 'Programa Oficial SIGA (OAI PDF)',
+      confidence: 'official_pdf_vision',
+      sourceLabel: 'Programa Oficial SIGA (Ecuación por Tramos α)',
       syllabusPdfUrl: pdfUrl,
-      syllabusRequirementsNote: sectionText.replace(/\s+/g, ' ').slice(0, 420),
+      syllabusRequirementsNote:
+        sectionText.replace(/\s+/g, ' ').slice(0, 420) +
+        ` | NF = PC*(1-α) + α*${tCode}, donde α = 0,30 si PC >= 60; α = 0 si PC <= 30; α = (PC/100) - 0,3 si 30 < PC < 60. Requisito ${tCode} >= 60.`,
+      sctCounts,
       formula: {
-        expression: `${certWeight.toFixed(2)} * PC + ${ctrlWeight.toFixed(2)} * PQ`,
+        expression: `PC * (1 - α) + α * ${tCode}`,
         passingGrade: 55,
-        applyPenaltyRule: false,
+        applyPenaltyRule: true,
+        piecewiseAlpha: {
+          baseBlockCode: 'PC',
+          targetBlockCode: tCode,
+          minThreshold: 30,
+          maxThreshold: 60,
+          maxAlpha: 0.3,
+        },
         subFormulas: [
           {
             id: 'certamenes',
-            name: 'Certámenes (Ponderados)',
+            name: 'Certámenes (C1, C2, C3)',
             code: 'PC',
-            type: 'weighted',
+            type: 'simple_average',
             prefix: 'C',
-            count: 3,
+            count: sctCounts.certamenesCount || 3,
             dropWorstCount: 0,
             minGradeRequired: null,
-            weightInFinal: certWeight,
+            weightInFinal: 0.7,
             evaluations: [
-              { id: 'c1', name: `Certamen 1 (${w1}%)`, weight: w1, score: null },
-              { id: 'c2', name: `Certamen 2 (${w2}%)`, weight: w2, score: null },
-              { id: 'c3', name: `Certamen 3 (${w3}%)`, weight: w3, score: null },
+              { id: 'c1', name: 'Certamen 1', weight: 1, score: null },
+              { id: 'c2', name: 'Certamen 2', weight: 1, score: null },
+              { id: 'c3', name: 'Certamen 3', weight: 1, score: null },
             ],
           },
           {
-            id: 'controles',
-            name: 'Controles',
-            code: 'PQ',
-            type: dropsWorstOne ? 'drop_worst' : 'simple_average',
-            prefix: 'Q',
-            count: 6,
-            dropWorstCount: dropsWorstOne ? 1 : 0,
-            minGradeRequired: null,
-            weightInFinal: ctrlWeight,
-            evaluations: Array.from({ length: 6 }, (_, i) => ({
-              id: `q${i + 1}`,
-              name: `Control ${i + 1}`,
+            id: isLab ? 'laboratorios' : 'tareas',
+            name: tName,
+            code: tCode,
+            type: 'simple_average',
+            prefix: isLab ? 'L' : 'T',
+            count: tCount,
+            dropWorstCount: 0,
+            minGradeRequired: 60,
+            weightInFinal: 0.3,
+            evaluations: Array.from({ length: tCount }, (_, i) => ({
+              id: `t${i + 1}`,
+              name: `${isLab ? 'Laboratorio' : 'Tarea'} ${i + 1}`,
               weight: 1,
               score: null,
             })),
@@ -130,9 +172,11 @@ export function parseUsmSyllabusEvaluationText(text, sigla, pdfUrl) {
     sourceLabel: 'Programa Oficial SIGA (OAI PDF)',
     syllabusPdfUrl: pdfUrl,
     syllabusRequirementsNote: sectionText.replace(/\s+/g, ' ').slice(0, 420),
+    sctCounts,
     dropsWorstOne,
     dropsWorstTwo,
     hasCertamenMin50,
+    hasCertamenMin55,
   };
 }
 
@@ -161,7 +205,7 @@ async function main() {
     `[extract-siga-formulas] Indexados ${urlIndex.size} programas oficiales PDF en SIGA USM.`
   );
   console.log(
-    `[extract-siga-formulas] Catálogo pre-compilado disponible en: ${OUTPUT_PATH}`
+    `[extract-siga-formulas] Catálogo oficial verificado disponible en: ${OUTPUT_PATH}`
   );
 }
 

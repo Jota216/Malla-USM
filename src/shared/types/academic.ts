@@ -151,9 +151,18 @@ export type SubFormulaType = 'simple_average' | 'drop_worst' | 'weighted';
 
 export type FormulaSourceType =
   | 'siga_pdf'
+  | 'sct_inferred'
   | 'department_heuristic'
   | 'preset'
   | 'custom';
+
+export interface PiecewiseAlphaRule {
+  baseBlockCode: string; // e.g. 'PC'
+  targetBlockCode: string; // e.g. 'PT' or 'PL'
+  minThreshold: number; // e.g. 30 (PC <= 30 -> alpha = 0)
+  maxThreshold: number; // e.g. 60 (PC >= 60 -> alpha = maxAlpha)
+  maxAlpha: number; // e.g. 0.30
+}
 
 export interface SubFormulaEvaluation {
   id: string;
@@ -180,6 +189,7 @@ export interface CourseFinalFormula {
   passingGrade: number; // default 55
   applyPenaltyRule: boolean; // IF all blocks with minGrade >= minGrade THEN NF = formula ELSE NF = min(block averages)
   subFormulas: SubFormulaBlock[];
+  piecewiseAlpha?: PiecewiseAlphaRule;
   source?: FormulaSourceType;
   sourceLabel?: string;
   syllabusRequirementsNote?: string;
@@ -224,6 +234,7 @@ export interface SubFormulaCourseSolveResult {
   status: SubFormulaSolverStatus;
   currentFinalGrade: number;
   formulaFinalGrade: number;
+  dynamicAlpha?: number | null;
   penaltyRuleApplies: boolean;
   isPenaltyTriggered: boolean;
   penaltyGrade: number | null;
