@@ -149,6 +149,12 @@ export interface EvaluationGroup {
 
 export type SubFormulaType = 'simple_average' | 'drop_worst' | 'weighted';
 
+export type FormulaSourceType =
+  | 'siga_pdf'
+  | 'department_heuristic'
+  | 'preset'
+  | 'custom';
+
 export interface SubFormulaEvaluation {
   id: string;
   name: string;
@@ -174,6 +180,10 @@ export interface CourseFinalFormula {
   passingGrade: number; // default 55
   applyPenaltyRule: boolean; // IF all blocks with minGrade >= minGrade THEN NF = formula ELSE NF = min(block averages)
   subFormulas: SubFormulaBlock[];
+  source?: FormulaSourceType;
+  sourceLabel?: string;
+  syllabusRequirementsNote?: string;
+  syllabusPdfUrl?: string;
 }
 
 export interface EnrolledCourseConfig {

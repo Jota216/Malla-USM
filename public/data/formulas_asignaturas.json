@@ -1,0 +1,360 @@
+{
+  "_meta": {
+    "version": "1.0.0",
+    "source": "Programas Oficiales de Asignatura SIGA USM (https://siga.usm.cl/prog_oai/programa_download)",
+    "regulation": "Reglamento Institucional N°1 USM - Evaluación y calificación de la asignatura",
+    "updatedAt": "2026-10-30"
+  },
+  "courses": {
+    "MAT-021": {
+      "sigla": "MAT-021",
+      "source": "siga_pdf",
+      "sourceLabel": "Programa Oficial SIGA (PDF 122005505)",
+      "syllabusPdfUrl": "https://siga.usm.cl/prog_oai/programa_download?pdf=%2Fusr%2Flocal%2Fsiga_doc%2Fprograma%2F122005505.pdf",
+      "syllabusRequirementsNote": "Certámenes (3), Controles (6). NP = 0,20*C1 + 0,25*C2 + 0,30*C3 + 0,25*PC donde PC es el promedio de los 5 controles con mejores calificaciones (se elimina la peor nota). Si 45 <= NP < 55, rinde Certamen Global (NF = 0,7*NP + 0,3*E).",
+      "passingGrade": 55,
+      "applyPenaltyRule": false,
+      "expression": "0.75 * PC + 0.25 * PQ",
+      "subFormulas": [
+        {
+          "id": "certamenes",
+          "name": "Certámenes (20% / 25% / 30%)",
+          "code": "PC",
+          "type": "weighted",
+          "prefix": "C",
+          "count": 3,
+          "dropWorstCount": 0,
+          "minGradeRequired": null,
+          "weightInFinal": 0.75,
+          "evaluations": [
+            { "id": "c1", "name": "Certamen 1 (20%)", "weight": 20, "score": null },
+            { "id": "c2", "name": "Certamen 2 (25%)", "weight": 25, "score": null },
+            { "id": "c3", "name": "Certamen 3 (30%)", "weight": 30, "score": null }
+          ]
+        },
+        {
+          "id": "controles",
+          "name": "Controles (5 mejores de 6)",
+          "code": "PQ",
+          "type": "drop_worst",
+          "prefix": "Q",
+          "count": 6,
+          "dropWorstCount": 1,
+          "minGradeRequired": null,
+          "weightInFinal": 0.25,
+          "evaluations": [
+            { "id": "q1", "name": "Control 1", "weight": 1, "score": null },
+            { "id": "q2", "name": "Control 2", "weight": 1, "score": null },
+            { "id": "q3", "name": "Control 3", "weight": 1, "score": null },
+            { "id": "q4", "name": "Control 4", "weight": 1, "score": null },
+            { "id": "q5", "name": "Control 5", "weight": 1, "score": null },
+            { "id": "q6", "name": "Control 6", "weight": 1, "score": null }
+          ]
+        }
+      ]
+    },
+    "MAT-022": {
+      "sigla": "MAT-022",
+      "source": "siga_pdf",
+      "sourceLabel": "Programa Oficial SIGA (Depto. Matemática)",
+      "syllabusRequirementsNote": "Certámenes (3), Controles (6). NP = 0,20*C1 + 0,25*C2 + 0,30*C3 + 0,25*PC donde PC promedia los mejores controles eliminando la peor calificación. Si 45 <= NP < 55, habilita Certamen Global.",
+      "passingGrade": 55,
+      "applyPenaltyRule": false,
+      "expression": "0.75 * PC + 0.25 * PQ",
+      "subFormulas": [
+        {
+          "id": "certamenes",
+          "name": "Certámenes (20% / 25% / 30%)",
+          "code": "PC",
+          "type": "weighted",
+          "prefix": "C",
+          "count": 3,
+          "dropWorstCount": 0,
+          "minGradeRequired": null,
+          "weightInFinal": 0.75,
+          "evaluations": [
+            { "id": "c1", "name": "Certamen 1 (20%)", "weight": 20, "score": null },
+            { "id": "c2", "name": "Certamen 2 (25%)", "weight": 25, "score": null },
+            { "id": "c3", "name": "Certamen 3 (30%)", "weight": 30, "score": null }
+          ]
+        },
+        {
+          "id": "controles",
+          "name": "Controles (5 mejores de 6)",
+          "code": "PQ",
+          "type": "drop_worst",
+          "prefix": "Q",
+          "count": 6,
+          "dropWorstCount": 1,
+          "minGradeRequired": null,
+          "weightInFinal": 0.25,
+          "evaluations": [
+            { "id": "q1", "name": "Control 1", "weight": 1, "score": null },
+            { "id": "q2", "name": "Control 2", "weight": 1, "score": null },
+            { "id": "q3", "name": "Control 3", "weight": 1, "score": null },
+            { "id": "q4", "name": "Control 4", "weight": 1, "score": null },
+            { "id": "q5", "name": "Control 5", "weight": 1, "score": null },
+            { "id": "q6", "name": "Control 6", "weight": 1, "score": null }
+          ]
+        }
+      ]
+    },
+    "MAT-023": {
+      "sigla": "MAT-023",
+      "source": "siga_pdf",
+      "sourceLabel": "Programa Oficial SIGA (Depto. Matemática)",
+      "syllabusRequirementsNote": "Certámenes (3) ponderados 75% + Controles (25%, elimina la peor nota). Derecho a Certamen Global si 45 <= NP < 55.",
+      "passingGrade": 55,
+      "applyPenaltyRule": false,
+      "expression": "0.75 * PC + 0.25 * PQ",
+      "subFormulas": [
+        {
+          "id": "certamenes",
+          "name": "Certámenes (20% / 25% / 30%)",
+          "code": "PC",
+          "type": "weighted",
+          "prefix": "C",
+          "count": 3,
+          "dropWorstCount": 0,
+          "minGradeRequired": null,
+          "weightInFinal": 0.75,
+          "evaluations": [
+            { "id": "c1", "name": "Certamen 1 (20%)", "weight": 20, "score": null },
+            { "id": "c2", "name": "Certamen 2 (25%)", "weight": 25, "score": null },
+            { "id": "c3", "name": "Certamen 3 (30%)", "weight": 30, "score": null }
+          ]
+        },
+        {
+          "id": "controles",
+          "name": "Controles (elimina 1 peor)",
+          "code": "PQ",
+          "type": "drop_worst",
+          "prefix": "Q",
+          "count": 5,
+          "dropWorstCount": 1,
+          "minGradeRequired": null,
+          "weightInFinal": 0.25,
+          "evaluations": [
+            { "id": "q1", "name": "Control 1", "weight": 1, "score": null },
+            { "id": "q2", "name": "Control 2", "weight": 1, "score": null },
+            { "id": "q3", "name": "Control 3", "weight": 1, "score": null },
+            { "id": "q4", "name": "Control 4", "weight": 1, "score": null },
+            { "id": "q5", "name": "Control 5", "weight": 1, "score": null }
+          ]
+        }
+      ]
+    },
+    "MAT-024": {
+      "sigla": "MAT-024",
+      "source": "siga_pdf",
+      "sourceLabel": "Programa Oficial SIGA (Depto. Matemática)",
+      "syllabusRequirementsNote": "Certámenes (3) ponderados 75% + Controles (25%, elimina la peor nota). Derecho a Certamen Global si 45 <= NP < 55.",
+      "passingGrade": 55,
+      "applyPenaltyRule": false,
+      "expression": "0.75 * PC + 0.25 * PQ",
+      "subFormulas": [
+        {
+          "id": "certamenes",
+          "name": "Certámenes (20% / 25% / 30%)",
+          "code": "PC",
+          "type": "weighted",
+          "prefix": "C",
+          "count": 3,
+          "dropWorstCount": 0,
+          "minGradeRequired": null,
+          "weightInFinal": 0.75,
+          "evaluations": [
+            { "id": "c1", "name": "Certamen 1 (20%)", "weight": 20, "score": null },
+            { "id": "c2", "name": "Certamen 2 (25%)", "weight": 25, "score": null },
+            { "id": "c3", "name": "Certamen 3 (30%)", "weight": 30, "score": null }
+          ]
+        },
+        {
+          "id": "controles",
+          "name": "Controles (elimina 1 peor)",
+          "code": "PQ",
+          "type": "drop_worst",
+          "prefix": "Q",
+          "count": 5,
+          "dropWorstCount": 1,
+          "minGradeRequired": null,
+          "weightInFinal": 0.25,
+          "evaluations": [
+            { "id": "q1", "name": "Control 1", "weight": 1, "score": null },
+            { "id": "q2", "name": "Control 2", "weight": 1, "score": null },
+            { "id": "q3", "name": "Control 3", "weight": 1, "score": null },
+            { "id": "q4", "name": "Control 4", "weight": 1, "score": null },
+            { "id": "q5", "name": "Control 5", "weight": 1, "score": null }
+          ]
+        }
+      ]
+    },
+    "FIS-110": {
+      "sigla": "FIS-110",
+      "source": "siga_pdf",
+      "sourceLabel": "Programa Oficial SIGA (PDF 121002506)",
+      "syllabusPdfUrl": "https://siga.usm.cl/prog_oai/programa_download?pdf=%2Fusr%2Flocal%2Fsiga_doc%2Fprograma%2F121002506.pdf",
+      "syllabusRequirementsNote": "Evaluación Cátedra: 3 Certámenes (75%, requisito C_i >= 50) + Controles (mejores n-1) y Tareas Aula (mejores n-2) = 25% (PTQ = 2/3 PQ + 1/3 PT). Laboratorio: Factor η >= 1,0 (30% controles lab + 70% informes). Certamen Global si PS >= 50.",
+      "passingGrade": 55,
+      "applyPenaltyRule": true,
+      "expression": "0.75 * PC + 0.17 * PQ + 0.08 * PT",
+      "subFormulas": [
+        {
+          "id": "certamenes",
+          "name": "Certámenes (C)",
+          "code": "PC",
+          "type": "simple_average",
+          "prefix": "C",
+          "count": 3,
+          "dropWorstCount": 0,
+          "minGradeRequired": 50,
+          "weightInFinal": 0.75,
+          "evaluations": [
+            { "id": "c1", "name": "Certamen 1", "weight": 1, "score": null },
+            { "id": "c2", "name": "Certamen 2", "weight": 1, "score": null },
+            { "id": "c3", "name": "Certamen 3", "weight": 1, "score": null }
+          ]
+        },
+        {
+          "id": "controles",
+          "name": "Controles (Q - mejores n-1)",
+          "code": "PQ",
+          "type": "drop_worst",
+          "prefix": "Q",
+          "count": 6,
+          "dropWorstCount": 1,
+          "minGradeRequired": null,
+          "weightInFinal": 0.17,
+          "evaluations": [
+            { "id": "q1", "name": "Control 1", "weight": 1, "score": null },
+            { "id": "q2", "name": "Control 2", "weight": 1, "score": null },
+            { "id": "q3", "name": "Control 3", "weight": 1, "score": null },
+            { "id": "q4", "name": "Control 4", "weight": 1, "score": null },
+            { "id": "q5", "name": "Control 5", "weight": 1, "score": null },
+            { "id": "q6", "name": "Control 6", "weight": 1, "score": null }
+          ]
+        },
+        {
+          "id": "tareas",
+          "name": "Tareas Aula (T - mejores n-2)",
+          "code": "PT",
+          "type": "drop_worst",
+          "prefix": "T",
+          "count": 6,
+          "dropWorstCount": 2,
+          "minGradeRequired": null,
+          "weightInFinal": 0.08,
+          "evaluations": [
+            { "id": "t1", "name": "Tarea 1", "weight": 1, "score": null },
+            { "id": "t2", "name": "Tarea 2", "weight": 1, "score": null },
+            { "id": "t3", "name": "Tarea 3", "weight": 1, "score": null },
+            { "id": "t4", "name": "Tarea 4", "weight": 1, "score": null },
+            { "id": "t5", "name": "Tarea 5", "weight": 1, "score": null },
+            { "id": "t6", "name": "Tarea 6", "weight": 1, "score": null }
+          ]
+        }
+      ]
+    },
+    "TEL-101": {
+      "sigla": "TEL-101",
+      "source": "siga_pdf",
+      "sourceLabel": "Programa Oficial SIGA (PDF 112037802)",
+      "syllabusPdfUrl": "https://siga.usm.cl/prog_oai/programa_download?pdf=%2Fusr%2Flocal%2Fsiga_doc%2Fprograma%2F112037802.pdf",
+      "syllabusRequirementsNote": "Promedio controles (PC) = 100% (4 controles considerados de 5 rendidos; se elimina la nota más baja). Si 50 <= PC < 55, existe la posibilidad de rendir un control global que reemplaza la menor nota entre las 4 consideradas.",
+      "passingGrade": 55,
+      "applyPenaltyRule": false,
+      "expression": "1.00 * PC",
+      "subFormulas": [
+        {
+          "id": "controles",
+          "name": "Controles (4 mejores de 5)",
+          "code": "PC",
+          "type": "drop_worst",
+          "prefix": "C",
+          "count": 5,
+          "dropWorstCount": 1,
+          "minGradeRequired": null,
+          "weightInFinal": 1.0,
+          "evaluations": [
+            { "id": "c1", "name": "Control 1", "weight": 1, "score": null },
+            { "id": "c2", "name": "Control 2", "weight": 1, "score": null },
+            { "id": "c3", "name": "Control 3", "weight": 1, "score": null },
+            { "id": "c4", "name": "Control 4", "weight": 1, "score": null },
+            { "id": "c5", "name": "Control 5", "weight": 1, "score": null }
+          ]
+        }
+      ]
+    },
+    "INF-360": {
+      "sigla": "INF-360",
+      "source": "siga_pdf",
+      "sourceLabel": "Programa Oficial SIGA (PDF 118060505)",
+      "syllabusPdfUrl": "https://siga.usm.cl/prog_oai/programa_download?pdf=%2Fusr%2Flocal%2Fsiga_doc%2Fprograma%2F118060505.pdf",
+      "syllabusRequirementsNote": "Se evalúa por proyectos sin certamen tradicional: NF = 0,15*(L + PP + EE) + 0,10*(EI + AG) + 0,25*PI + 0,10*CC (Licitación 15%, Plan de Proyecto 15%, Evaluación Económica 15%, Entregables Individuales 10%, Actividades Grupales 10%, Prototipo Inicial 25%, Compromiso 10%).",
+      "passingGrade": 55,
+      "applyPenaltyRule": false,
+      "expression": "0.45 * Hitos + 0.25 * PI + 0.20 * Act + 0.10 * CC",
+      "subFormulas": [
+        {
+          "id": "hitos",
+          "name": "Hitos de Proyecto (L, PP, EE)",
+          "code": "HP",
+          "type": "simple_average",
+          "prefix": "H",
+          "count": 3,
+          "dropWorstCount": 0,
+          "minGradeRequired": null,
+          "weightInFinal": 0.45,
+          "evaluations": [
+            { "id": "h1", "name": "Licitación (L)", "weight": 1, "score": null },
+            { "id": "h2", "name": "Plan de Proyecto (PP)", "weight": 1, "score": null },
+            { "id": "h3", "name": "Evaluación Económica (EE)", "weight": 1, "score": null }
+          ]
+        },
+        {
+          "id": "prototipo",
+          "name": "Prototipo Inicial (PI)",
+          "code": "PI",
+          "type": "simple_average",
+          "prefix": "PI",
+          "count": 1,
+          "dropWorstCount": 0,
+          "minGradeRequired": null,
+          "weightInFinal": 0.25,
+          "evaluations": [
+            { "id": "pi1", "name": "Prototipo Inicial", "weight": 1, "score": null }
+          ]
+        },
+        {
+          "id": "actividades",
+          "name": "Entregables Ind. (EI) y Grupales (AG)",
+          "code": "EA",
+          "type": "simple_average",
+          "prefix": "E",
+          "count": 2,
+          "dropWorstCount": 0,
+          "minGradeRequired": null,
+          "weightInFinal": 0.20,
+          "evaluations": [
+            { "id": "e1", "name": "Entregables Individuales (EI)", "weight": 1, "score": null },
+            { "id": "e2", "name": "Actividades Grupales (AG)", "weight": 1, "score": null }
+          ]
+        },
+        {
+          "id": "compromiso",
+          "name": "Compromiso y Cumplimiento (CC)",
+          "code": "CC",
+          "type": "simple_average",
+          "prefix": "CC",
+          "count": 1,
+          "dropWorstCount": 0,
+          "minGradeRequired": null,
+          "weightInFinal": 0.10,
+          "evaluations": [
+            { "id": "cc1", "name": "Compromiso y Cumplimiento", "weight": 1, "score": null }
+          ]
+        }
+      ]
+    }
+  }
+}
