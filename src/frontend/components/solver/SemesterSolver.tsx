@@ -2,20 +2,8 @@ import * as React from "react";
 import { useAcademicStore } from "@/shared/store/useAcademicStore";
 import { ensureFormulaConfig } from "@/wolfram-solver/templates/defaultTemplates";
 import { CourseSolverCard } from "./CourseSolverCard";
+import { EnrollCourseModal } from "./EnrollCourseModal";
 import { Button } from "@/frontend/components/ui/button";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/frontend/components/ui/popover";
-import {
-  Command,
-  CommandInput,
-  CommandList,
-  CommandEmpty,
-  CommandGroup,
-  CommandItem,
-} from "@/frontend/components/ui/command";
 import {
   Plus,
   Sparkles,
@@ -28,7 +16,6 @@ export function SemesterSolver() {
   const {
     curriculum,
     inProgressCourses,
-    enrollCourse,
     unenrollCourse,
     loadInf292Example,
     setSubFormulaEvaluationScore,
@@ -36,16 +23,9 @@ export function SemesterSolver() {
     getSubFormulaSolveResult,
   } = useAcademicStore();
 
-  const [openCombobox, setOpenCombobox] = React.useState(false);
+  const [enrollModalOpen, setEnrollModalOpen] = React.useState(false);
 
   const enrolledSiglas = Object.keys(inProgressCourses);
-
-  // Available courses from the curriculum not currently enrolled
-  const availableToEnroll = React.useMemo(() => {
-    return curriculum.ramos.filter(
-      (r) => !inProgressCourses[r.sigla.toUpperCase()]
-    );
-  }, [curriculum.ramos, inProgressCourses]);
 
   // Aggregate semester metrics
   const semesterMetrics = React.useMemo(() => {
@@ -55,91 +35,38 @@ export function SemesterSolver() {
       const course = curriculum.ramos.find(
         (r) => r.sigla.toUpperCase() === sigla.toUpperCase()
       );
+      const enrolledCfg = inProgressCourses[sigla];
       if (course) {
         sct += course.creditos_sct || 0;
         usm += course.creditos_usm || 0;
+      } else if (enrolledCfg?.customCreditsSct) {
+        sct += enrolledCfg.customCreditsSct;
       }
     }
     return { sct, usm };
-  }, [curriculum.ramos, enrolledSiglas]);
-
-  const handleEnroll = (sigla: string) => {
-    enrollCourse(sigla);
-    setOpenCombobox(false);
-  };
+  }, [curriculum.ramos, enrolledSiglas, inProgressCourses]);
 
   return (
     <div className="space-y-6">
       {/* Top Bar: Selector + Cargar Ejemplo INF-292 + Metrics */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-xl border border-zinc-800 bg-zinc-900/90 shadow-md">
-        {/* Left: Enrollment Selector + Example Button */}
+        {/* Left: Enrollment Modal Button + Example Button */}
         <div className="flex flex-wrap items-center gap-2.5">
-          {/* Quick Course Enrollment Combobox */}
-          <Popover open={openCombobox} onOpenChange={setOpenCombobox}>
-            <PopoverTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-9 px-3 text-xs font-semibold gap-1.5 border-zinc-700 bg-zinc-950/80 text-zinc-100 hover:bg-zinc-800 hover:border-zinc-600 transition-colors"
-                aria-label="Inscribir asignatura al semestre"
-              >
-                <Plus className="h-4 w-4 text-amber-400" />
-                <span>Inscribir Asignatura</span>
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent
-              className="w-80 sm:w-96 p-0 border-zinc-800 bg-zinc-900 shadow-2xl"
-              align="start"
-            >
-              <Command className="bg-transparent text-zinc-100">
-                <CommandInput
-                  placeholder="Buscar por código o nombre (ej. INF-292, MAT-022)..."
-                  className="text-xs"
-                />
-                <CommandList className="max-h-64 overflow-y-auto">
-                  <CommandEmpty className="py-4 text-center text-xs text-zinc-400">
-                    No se encontraron asignaturas disponibles.
-                  </CommandEmpty>
-                  <CommandGroup heading="Asignaturas Disponibles de la Malla">
-                    {availableToEnroll.map((course) => (
-                      <CommandItem
-                        key={course.sigla}
-                        value={`${course.sigla} ${course.nombre}`}
-                        onSelect={() => handleEnroll(course.sigla)}
-                        className="flex items-center justify-between p-2.5 text-xs text-zinc-200 hover:bg-zinc-800/80 cursor-pointer rounded-md transition-colors"
-                      >
-                        <div className="space-y-0.5">
-                          <div className="font-mono font-bold text-zinc-100">
-                            {course.sigla} •{" "}
-                            <span className="font-sans font-medium text-zinc-300">
-                              {course.nombre}
-                            </span>
-                          </div>
-                          <div className="text-[10px] text-zinc-400">
-                            Semestre {course.semestre} • {course.creditos_usm} USM | {course.creditos_sct} SCT
-                          </div>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 px-2 text-[10px] font-semibold text-amber-400 hover:text-amber-300 hover:bg-amber-950/40"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleEnroll(course.sigla);
-                          }}
-                        >
-                          + Inscribir
-                        </Button>
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                </CommandList>
-              </Command>
-            </PopoverContent>
-          </Popover>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setEnrollModalOpen(true)}
+            className="h-9 px-3 text-xs font-semibold gap-1.5 border-zinc-700 bg-zinc-950/80 text-zinc-100 hover:bg-zinc-800 hover:border-zinc-600 transition-colors"
+            aria-label="Inscribir asignatura al semestre"
+          >
+            <Plus className="h-4 w-4 text-amber-400" />
+            <span>Inscribir Asignatura</span>
+          </Button>
 
           {/* Quick Action Button: Cargar Ejemplo INF-292 */}
           <Button
+            type="button"
             size="sm"
             onClick={loadInf292Example}
             className="h-9 px-3.5 text-xs font-bold gap-1.5 bg-gradient-to-r from-[#002B49] to-[#003d69] hover:from-[#003459] hover:to-[#004d85] text-amber-400 border border-amber-500/30 shadow-sm transition-all hover:border-amber-400/50"
@@ -191,68 +118,34 @@ export function SemesterSolver() {
               Sin asignaturas inscritas este semestre
             </h3>
             <p className="text-xs sm:text-sm text-zinc-400 leading-relaxed">
-              Inscribe ramos de la malla para calcular automáticamente qué notas necesitas para aprobar o carga el modelo completo de <strong>INF-292 (Optimización)</strong>.
+              Inscribe ramos de tu malla ({curriculum.carrera}) filtrando por{" "}
+              <strong>Disponibles</strong>, <strong>Bloqueados</strong> o{" "}
+              <strong>Aprobados</strong>, o carga el modelo de ejemplo{" "}
+              <strong>INF-292 (Optimización)</strong>.
             </p>
           </div>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
             <Button
+              type="button"
               size="default"
+              onClick={() => setEnrollModalOpen(true)}
+              className="w-full sm:w-auto h-10 px-5 text-xs font-bold gap-2 bg-gradient-to-r from-[#002B49] to-[#003d69] hover:from-[#003459] hover:to-[#004d85] text-white border border-amber-500/40 shadow-md"
+            >
+              <Plus className="h-4 w-4 text-amber-400" />
+              Inscribir Ramo de la Malla
+            </Button>
+
+            <Button
+              type="button"
+              size="default"
+              variant="outline"
               onClick={loadInf292Example}
-              className="w-full sm:w-auto h-10 px-5 text-xs font-bold gap-2 bg-gradient-to-r from-[#002B49] to-[#003d69] hover:from-[#003459] hover:to-[#004d85] text-amber-400 border border-amber-500/40 shadow-md"
+              className="w-full sm:w-auto h-10 px-5 text-xs font-semibold gap-2 border-zinc-700 bg-zinc-800 text-amber-400 hover:bg-zinc-700 hover:text-amber-300"
             >
               <Sparkles className="h-4 w-4 text-amber-400" />
               Cargar Ejemplo INF-292 (Optimización)
             </Button>
-
-            <Popover open={openCombobox} onOpenChange={setOpenCombobox}>
-              <PopoverTrigger asChild>
-                <Button
-                  size="default"
-                  variant="outline"
-                  className="w-full sm:w-auto h-10 px-5 text-xs font-semibold gap-2 border-zinc-700 bg-zinc-800 text-zinc-200 hover:bg-zinc-700 hover:text-zinc-100"
-                >
-                  <Plus className="h-4 w-4" />
-                  Inscribir Ramo de la Malla
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent
-                className="w-80 sm:w-96 p-0 border-zinc-800 bg-zinc-900 shadow-2xl"
-                align="center"
-              >
-                <Command className="bg-transparent text-zinc-100">
-                  <CommandInput
-                    placeholder="Buscar por código o nombre..."
-                    className="text-xs"
-                  />
-                  <CommandList className="max-h-64 overflow-y-auto">
-                    <CommandEmpty className="py-4 text-center text-xs text-zinc-400">
-                      No se encontraron asignaturas disponibles.
-                    </CommandEmpty>
-                    <CommandGroup heading="Asignaturas Disponibles">
-                      {availableToEnroll.map((course) => (
-                        <CommandItem
-                          key={course.sigla}
-                          value={`${course.sigla} ${course.nombre}`}
-                          onSelect={() => handleEnroll(course.sigla)}
-                          className="flex items-center justify-between p-2.5 text-xs text-zinc-200 hover:bg-zinc-800/80 cursor-pointer rounded-md"
-                        >
-                          <div>
-                            <span className="font-mono font-bold text-zinc-100">
-                              {course.sigla}
-                            </span>{" "}
-                            • {course.nombre}
-                          </div>
-                          <span className="text-[10px] text-zinc-400 font-mono">
-                            {course.creditos_sct} SCT
-                          </span>
-                        </CommandItem>
-                      ))}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
           </div>
 
           <div className="pt-4 border-t border-zinc-800/80 text-[11px] text-zinc-500 max-w-sm mx-auto flex items-center justify-center gap-1.5">
@@ -278,7 +171,19 @@ export function SemesterSolver() {
             const courseInfo =
               curriculum.ramos.find(
                 (r) => r.sigla.toUpperCase() === sigla.toUpperCase()
-              ) || null;
+              ) ||
+              (courseConfig.customName
+                ? {
+                    id: 0,
+                    sigla,
+                    nombre: courseConfig.customName,
+                    semestre: 0,
+                    creditos_usm: 0,
+                    creditos_sct: courseConfig.customCreditsSct || 0,
+                    area: "ELEC",
+                    prerrequisitos: [],
+                  }
+                : null);
 
             const areaInfo = courseInfo?.area
               ? curriculum.areas[courseInfo.area] || null
@@ -302,6 +207,12 @@ export function SemesterSolver() {
           })}
         </div>
       )}
+
+      {/* Modal de Inscripción Filtrado por Malla y Estado */}
+      <EnrollCourseModal
+        open={enrollModalOpen}
+        onOpenChange={setEnrollModalOpen}
+      />
     </div>
   );
 }
