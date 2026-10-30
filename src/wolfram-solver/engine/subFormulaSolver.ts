@@ -629,3 +629,170 @@ export function simulateSubFormulaGrades(
 
   return solveSubFormulaCourse(clonedConfig);
 }
+
+
+export type GlobalExamModality = 'mat_70_30' | 'fis_60_40' | 'replace_worst';
+
+export interface GlobalExamScenarioResult {
+  modality: GlobalExamModality;
+  label: string;
+  formulaDescription: string;
+  presentationGrade: number;
+  isEligibleByRange: boolean;
+  eligibilityNote: string;
+  requiredExamScore: number | null;
+  isReachable: boolean;
+  replacedEvalLabel?: string;
+  replacedOriginalScore?: number | null;
+  projectFinalGrade: (examScore: number) => number;
+}
+
+/**
+ * Calcula los escenarios oficiales de Certamen Global / Examen Recuperativo USM:
+ * 1. Modalidad Depto. Matemática (`mat_70_30`): NF = 0,70 * NP + 0,30 * E (si 45 <= NP < 55).
+ * 2. Modalidad Depto. Física (`fis_60_40`): NF = 0,60 * PS + 0,40 * CG (si PS >= 50 y CG >= 50).
+ * 3. Modalidad Reemplazo Peor Certamen (`replace_worst`): Reemplaza la menor nota del bloque principal (PC).
+ */
+export function computeGlobalExamScenarios(
+  config: CourseFinalFormula,
+  solveResult: SubFormulaCourseSolveResult
+): Record<GlobalExamModality, GlobalExamScenarioResult> {
+  const passingGrade = config.passingGrade ?? 55;
+  const blocks = config.subFormulas || [];
+  const normalizedWeights = normalizeWeights(blocks.map((b) => b.weightInFinal));
+
+  // Nota de presentación proyectada (considerando notas ingresadas o promedio con 0 si todo se rindió)
+  const np =
+    solveResult.formulaFinalGrade > 0
+      ? solveResult.formulaFinalGrade
+      : solveResult.blocks.reduce(
+          (acc, b, idx) => acc + normalizedWeights[idx] * b.projectedAverageWithZero,
+          0
+        );
+
+  // 1. MAT 70/30: NF = 0.70 * NP + 0.30 * E
+  const reqMat = roundTo(Math.max(0, (passingGrade - 0.7 * np) / 0.3), 1);
+  const matScenario: GlobalExamScenarioResult = {
+    modality: 'mat_70_30',
+    label: 'Global Matemática (70% NP + 30% Global)',
+    formulaDescription: 'NF = 0,70 × NP + 0,30 × E (Derecho a Global con 45 ≤ NP < 55)',
+    presentationGrade: roundTo(np, 1),
+    isEligibleByRange: np >= 45 && np < passingGrade,
+    eligibilityNote:
+      np >= passingGrade
+        ? 'Ya tienes NP ≥ 55.'
+        : np >= 45
+        ? 'Cumples rango 45 ≤ NP < 55 para rendir Certamen Global.'
+        : 'NP actual bajo 45 (sube tus notas restantes para entrar al rango 45–54).',
+    requiredExamScore: reqMat,
+    isReachable: reqMat <= 100,
+    projectFinalGrade: (examScore: number) => roundTo(0.7 * np + 0.3 * examScore, 1),
+  };
+
+  // 2. FIS 60/40: NF = 0.60 * PS + 0.40 * CG (con CG >= 50)
+  const rawFis = (passingGrade - 0.6 * np) / 0.4;
+  const reqFis = roundTo(Math.max(50, rawFis), 1);
+  const fisScenario: GlobalExamScenarioResult = {
+    modality: 'fis_60_40',
+    label: 'Global Física (60% PS + 40% Global, mín. 50)',
+    formulaDescription: 'NF = 0,60 × PS + 0,40 × CG (Exige PS ≥ 50 y nota CG ≥ 50)',
+    presentationGrade: roundTo(np, 1),
+    isEligibleByRange: np >= 50 && np < passingGrade,
+    eligibilityNote:
+      np >= passingGrade
+        ? 'Ya tienes PS ≥ 55.'
+        : np >= 50
+        ? 'Cumples PS ≥ 50 para rendir Certamen Global.'
+        : 'En Física se exige promedio semestral PS ≥ 50 para derecho a Global.',
+    requiredExamScore: reqFis,
+    isReachable: reqFis <= 100,
+    projectFinalGrade: (examScore: number) =>
+      examScore < 50
+        ? roundTo(Math.min(examScore, 54), 1)
+        : roundTo(0.6 * np + 0.4 * examScore, 1),
+  };
+
+  // 3. Reemplazo del peor certamen/evaluación en el bloque principal (PC o bloque 0)
+  const targetBlockIdx = Math.max(
+    0,
+    blocks.findIndex(
+      (b) =>
+        b.code.toUpperCase() === 'PC' ||
+        b.name.toLowerCase().includes('certam')
+    )
+  );
+  const targetBlock = blocks[targetBlockIdx];
+
+  let worstEvalIdx = 0;
+  let worstScore: number | null = null;
+  if (targetBlock && targetBlock.evaluations.length > 0) {
+    targetBlock.evaluations.forEach((ev, idx) => {
+      const val = ev.score !== null && ev.score !== undefined ? Number(ev.score) : 0;
+      if (worstScore === null || val < worstScore) {
+        worstScore = val;
+        worstEvalIdx = idx;
+      }
+    });
+  }
+
+  const evalWithReplacedScore = (examScore: number): number => {
+    if (!targetBlock) return np;
+    const cloned: CourseFinalFormula = JSON.parse(JSON.stringify(config));
+    const b = cloned.subFormulas[targetBlockIdx];
+    b.evaluations.forEach((ev, idx) => {
+      if (idx === worstEvalIdx) {
+        ev.score = examScore;
+      } else if (ev.score === null || ev.score === undefined) {
+        ev.score = 0;
+      }
+    });
+    const res = solveSubFormulaCourse(cloned, passingGrade);
+    return res.currentFinalGrade;
+  };
+
+  let reqReplace: number | null = null;
+  if (targetBlock) {
+    let low = 0;
+    let high = 200;
+    for (let iter = 0; iter < 35; iter++) {
+      const mid = (low + high) / 2;
+      if (evalWithReplacedScore(mid) >= passingGrade) {
+        high = mid;
+      } else {
+        low = mid;
+      }
+    }
+    reqReplace = roundTo(high, 1);
+  }
+
+  const replacedEval = targetBlock?.evaluations[worstEvalIdx];
+  const replacedLabel = replacedEval
+    ? `${targetBlock.prefix || targetBlock.code}${worstEvalIdx + 1}`
+    : 'C1';
+
+  const replaceScenario: GlobalExamScenarioResult = {
+    modality: 'replace_worst',
+    label: `Recuperativo Reemplaza Peor Nota (${replacedLabel})`,
+    formulaDescription: `El examen recuperativo sustituye la calificación más baja de ${
+      targetBlock?.name || 'Certámenes'
+    } (${replacedLabel}: ${
+      replacedEval?.score !== null && replacedEval?.score !== undefined
+        ? replacedEval.score
+        : '—'
+    }).`,
+    presentationGrade: roundTo(np, 1),
+    isEligibleByRange: true,
+    eligibilityNote: `Simula reemplazar ${replacedLabel} manteniendo las demás notas actuales.`,
+    requiredExamScore: reqReplace,
+    isReachable: reqReplace !== null && reqReplace <= 100,
+    replacedEvalLabel: replacedLabel,
+    replacedOriginalScore: replacedEval?.score ?? null,
+    projectFinalGrade: (examScore: number) => roundTo(evalWithReplacedScore(examScore), 1),
+  };
+
+  return {
+    mat_70_30: matScenario,
+    fis_60_40: fisScenario,
+    replace_worst: replaceScenario,
+  };
+}

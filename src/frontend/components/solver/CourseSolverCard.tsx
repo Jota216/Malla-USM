@@ -6,6 +6,10 @@ import {
   AreaInfo,
   CourseFinalFormula,
 } from "@/shared/types/academic";
+import {
+  computeGlobalExamScenarios,
+  GlobalExamModality,
+} from "@/wolfram-solver/engine/subFormulaSolver";
 import { sigaService } from "@/curricula/services/sigaService";
 import { FormulaEditorModal } from "./FormulaEditorModal";
 import { Card, CardHeader, CardContent } from "@/frontend/components/ui/card";
@@ -21,6 +25,7 @@ import {
   SlidersHorizontal,
   FileText,
   Sparkles,
+  LifeBuoy,
 } from "lucide-react";
 
 interface CourseSolverCardProps {
@@ -68,6 +73,13 @@ function getDroppedEvalIds(
   return set;
 }
 
+function getDefaultModalityForSigla(sigla: string): GlobalExamModality {
+  const upper = sigla.toUpperCase();
+  if (upper.startsWith("MAT")) return "mat_70_30";
+  if (upper.startsWith("FIS")) return "fis_60_40";
+  return "replace_worst";
+}
+
 export function CourseSolverCard({
   sigla,
   formula,
@@ -81,6 +93,12 @@ export function CourseSolverCard({
   onQuickApprove,
 }: CourseSolverCardProps) {
   const [editorOpen, setEditorOpen] = React.useState(false);
+  const [showGlobalSim, setShowGlobalSim] = React.useState(false);
+  const [examModality, setExamModality] = React.useState<GlobalExamModality>(() =>
+    getDefaultModalityForSigla(sigla)
+  );
+  const [simulatedExamScore, setSimulatedExamScore] = React.useState<string>("");
+
   const [resolvedPdfUrl, setResolvedPdfUrl] = React.useState<string | null>(
     formula.syllabusPdfUrl || courseInfo?.programa_pdf || null
   );
@@ -157,6 +175,22 @@ export function CourseSolverCard({
     !isFailed;
 
   const isOnTrack = !isApproved && !isFailed && !isInDanger && !isCriticalMin;
+
+  const globalScenarios = React.useMemo(
+    () => computeGlobalExamScenarios(formula, solveResult),
+    [formula, solveResult]
+  );
+
+  const activeScenario = globalScenarios[examModality];
+  const parsedSimScore =
+    simulatedExamScore.trim() !== "" && !isNaN(Number(simulatedExamScore))
+      ? Math.min(100, Math.max(0, Number(simulatedExamScore)))
+      : null;
+
+  const projectedPostGlobalGrade =
+    parsedSimScore !== null
+      ? activeScenario.projectFinalGrade(parsedSimScore)
+      : null;
 
   // Build the stylized monospace formula string
   const formulaEquation = React.useMemo(() => {
@@ -566,8 +600,8 @@ export function CourseSolverCard({
           </div>
         </div>
 
-        {/* 5. Único Banner de Diagnóstico Limpio por Ramo */}
-        <div className="pt-2">
+        {/* 5. Único Banner de Diagnóstico Limpio por Ramo + Simulador Certamen Global / Recuperativo */}
+        <div className="pt-2 space-y-2.5">
           {/* APROBADO */}
           {isApproved && (
             <div className="rounded-xl border border-emerald-700/70 bg-emerald-950/40 p-3.5 sm:p-4 text-emerald-200 flex items-start gap-3 shadow-md">
@@ -586,80 +620,255 @@ export function CourseSolverCard({
 
           {/* REPROBADO (Todo evaluado y no aprobó) */}
           {isFailed && (
-            <div className="rounded-xl border border-rose-800 bg-rose-950/40 p-3.5 sm:p-4 text-rose-200 flex items-start gap-3 shadow-md">
-              <XCircle className="h-5 w-5 text-rose-400 shrink-0 mt-0.5" />
-              <div className="space-y-0.5 text-xs sm:text-sm">
-                <div className="font-bold text-rose-300">
-                  Reprobado: Nota final obtenida:{" "}
-                  {solveResult.currentFinalGrade.toFixed(1)}.
-                </div>
-                <div className="text-rose-200/90">
-                  No alcanza el mínimo de aprobación ({formula.passingGrade}) o
-                  no cumplió con el requisito de bloque.
+            <div className="rounded-xl border border-rose-800 bg-rose-950/40 p-3.5 sm:p-4 text-rose-200 flex items-start justify-between gap-3 shadow-md">
+              <div className="flex items-start gap-3">
+                <XCircle className="h-5 w-5 text-rose-400 shrink-0 mt-0.5" />
+                <div className="space-y-0.5 text-xs sm:text-sm">
+                  <div className="font-bold text-rose-300">
+                    Reprobado en presentación: Nota obtenida:{" "}
+                    {solveResult.currentFinalGrade.toFixed(1)}.
+                  </div>
+                  <div className="text-rose-200/90">
+                    No alcanza el mínimo de aprobación ({formula.passingGrade})
+                    o no cumplió con el requisito de bloque.
+                  </div>
                 </div>
               </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowGlobalSim((v) => !v)}
+                className="h-8 px-2.5 text-xs font-semibold border-rose-500/40 bg-rose-950/60 text-rose-200 hover:bg-rose-900/60 shrink-0 gap-1.5"
+              >
+                <LifeBuoy className="h-3.5 w-3.5 text-amber-400" />
+                <span>Simular Global / Recup.</span>
+              </Button>
             </div>
           )}
 
           {/* EN PELIGRO / REFIERE RECUPERATIVO / REQ > 80 O > 100 */}
           {isInDanger && (
-            <div className="rounded-xl border border-rose-800/80 bg-rose-950/40 p-3.5 sm:p-4 text-rose-200 flex items-start gap-3 shadow-md">
-              <AlertTriangle className="h-5 w-5 text-rose-400 shrink-0 mt-0.5" />
-              <div className="space-y-0.5 text-xs sm:text-sm">
-                <div className="font-bold text-rose-300">
-                  En Peligro: La nota requerida supera 80 (
-                  {Y !== null ? Y.toFixed(1) : ">100"}).
-                </div>
-                <div className="text-rose-200/90">
-                  {Y !== null && Y > 100
-                    ? `Matemáticamente inviable con escala normal (exige ${Y.toFixed(
-                        1
-                      )}). Requiere examen recuperativo o convalidación extraordinaria.`
-                    : `Necesitas promediar ${
-                        Y?.toFixed(1) ?? "—"
-                      } en las ${Z} evaluaciones restantes. Requiere rendimiento extraordinario o examen recuperativo.`}
+            <div className="rounded-xl border border-rose-800/80 bg-rose-950/40 p-3.5 sm:p-4 text-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="h-5 w-5 text-rose-400 shrink-0 mt-0.5" />
+                <div className="space-y-0.5 text-xs sm:text-sm">
+                  <div className="font-bold text-rose-300">
+                    En Peligro: La nota requerida supera 80 (
+                    {Y !== null ? Y.toFixed(1) : ">100"}).
+                  </div>
+                  <div className="text-rose-200/90">
+                    {Y !== null && Y > 100
+                      ? `Matemáticamente inviable con escala normal (exige ${Y.toFixed(
+                          1
+                        )}). Requiere examen recuperativo o certamen global.`
+                      : `Necesitas promediar ${
+                          Y?.toFixed(1) ?? "—"
+                        } en las ${Z} evaluaciones restantes. Requiere rendimiento extraordinario o examen recuperativo.`}
+                  </div>
                 </div>
               </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowGlobalSim((v) => !v)}
+                className="h-8 px-2.5 text-xs font-semibold border-amber-500/40 bg-zinc-900/90 text-amber-300 hover:bg-zinc-800 shrink-0 gap-1.5"
+              >
+                <LifeBuoy className="h-3.5 w-3.5 text-amber-400" />
+                <span>
+                  {showGlobalSim ? "Ocultar Simulador" : "Simular Global / Recup."}
+                </span>
+              </Button>
             </div>
           )}
 
           {/* ATENCIÓN: BLOQUE MÍNIMO ES LA CONDICIÓN VINCULANTE */}
           {isCriticalMin && (
-            <div className="rounded-xl border border-amber-800/80 bg-amber-950/40 p-3.5 sm:p-4 text-amber-200 flex items-start gap-3 shadow-md">
-              <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
-              <div className="space-y-0.5 text-xs sm:text-sm">
-                <div className="font-bold text-amber-300">
-                  Atención: El bloque [
-                  {solveResult.bindingBlockCode || "Mínimo"}] exige promediar{" "}
-                  {Y?.toFixed(1) ?? "—"}
-                </div>
-                <div className="text-amber-200/90">
-                  En los certámenes/evaluaciones restantes para alcanzar el
-                  mínimo de bloque (restricción más exigente que la meta global
-                  de NF ≥ {formula.passingGrade}).
+            <div className="rounded-xl border border-amber-800/80 bg-amber-950/40 p-3.5 sm:p-4 text-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+                <div className="space-y-0.5 text-xs sm:text-sm">
+                  <div className="font-bold text-amber-300">
+                    Atención: El bloque [
+                    {solveResult.bindingBlockCode || "Mínimo"}] exige promediar{" "}
+                    {Y?.toFixed(1) ?? "—"}
+                  </div>
+                  <div className="text-amber-200/90">
+                    En los certámenes/evaluaciones restantes para alcanzar el
+                    mínimo de bloque (restricción más exigente que la meta
+                    global de NF ≥ {formula.passingGrade}).
+                  </div>
                 </div>
               </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowGlobalSim((v) => !v)}
+                className="h-8 px-2.5 text-xs font-semibold border-amber-500/40 bg-zinc-900/90 text-amber-300 hover:bg-zinc-800 shrink-0 gap-1.5"
+              >
+                <LifeBuoy className="h-3.5 w-3.5 text-amber-400" />
+                <span>
+                  {showGlobalSim ? "Ocultar Simulador" : "Simular Global / Recup."}
+                </span>
+              </Button>
             </div>
           )}
 
           {/* EN CARRERA (NORMAL) */}
           {isOnTrack && (
-            <div className="rounded-xl border border-zinc-700/80 bg-zinc-950/80 p-3.5 sm:p-4 text-zinc-200 flex items-start gap-3 shadow-md">
-              <TrendingUp className="h-5 w-5 text-blue-400 shrink-0 mt-0.5" />
-              <div className="space-y-0.5 text-xs sm:text-sm">
-                <div className="font-bold text-zinc-100">
-                  Puntos acumulados:{" "}
-                  <span className="text-amber-400">{X.toFixed(1)} pts</span>.
+            <div className="rounded-xl border border-zinc-700/80 bg-zinc-950/80 p-3.5 sm:p-4 text-zinc-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+              <div className="flex items-start gap-3">
+                <TrendingUp className="h-5 w-5 text-blue-400 shrink-0 mt-0.5" />
+                <div className="space-y-0.5 text-xs sm:text-sm">
+                  <div className="font-bold text-zinc-100">
+                    Puntos acumulados:{" "}
+                    <span className="text-amber-400">{X.toFixed(1)} pts</span>.
+                  </div>
+                  <div className="text-zinc-300">
+                    Necesitas promediar{" "}
+                    <strong className="text-blue-300 font-mono text-sm">
+                      {Y !== null ? Y.toFixed(1) : "—"}
+                    </strong>{" "}
+                    en las {Z}{" "}
+                    {Z === 1 ? "evaluación restante" : "evaluaciones restantes"}{" "}
+                    para cumplir los requisitos y aprobar con NF ≥{" "}
+                    {formula.passingGrade}.
+                  </div>
                 </div>
-                <div className="text-zinc-300">
-                  Necesitas promediar{" "}
-                  <strong className="text-blue-300 font-mono text-sm">
-                    {Y !== null ? Y.toFixed(1) : "—"}
-                  </strong>{" "}
-                  en las {Z}{" "}
-                  {Z === 1 ? "evaluación restante" : "evaluaciones restantes"}{" "}
-                  para cumplir los requisitos y aprobar con NF ≥{" "}
-                  {formula.passingGrade}.
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowGlobalSim((v) => !v)}
+                className="h-8 px-2.5 text-xs text-zinc-400 hover:text-amber-300 hover:bg-zinc-900 shrink-0 gap-1.5"
+              >
+                <LifeBuoy className="h-3.5 w-3.5 text-amber-400" />
+                <span>
+                  {showGlobalSim ? "Ocultar Global" : "¿Y si voy a Global?"}
+                </span>
+              </Button>
+            </div>
+          )}
+
+          {/* Panel Desplegable: Simulador de Certamen Global / Examen Recuperativo USM */}
+          {showGlobalSim && !isApproved && (
+            <div className="rounded-xl border border-amber-500/30 bg-zinc-950/90 p-3.5 sm:p-4 space-y-3 animate-in fade-in-50 duration-150">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-xs font-bold text-amber-300">
+                  <LifeBuoy className="h-4 w-4 text-amber-400" />
+                  <span>
+                    Simulador de Certamen Global / Examen Recuperativo USM
+                  </span>
+                </div>
+
+                {/* Selector de modalidad reglamentaria USM */}
+                <div className="flex flex-wrap gap-1.5">
+                  {(
+                    [
+                      {
+                        id: "mat_70_30",
+                        shortLabel: "MAT (70% NP + 30% Global)",
+                      },
+                      {
+                        id: "fis_60_40",
+                        shortLabel: "FIS (60% PS + 40% Global)",
+                      },
+                      {
+                        id: "replace_worst",
+                        shortLabel: "Reemplaza Peor Certamen",
+                      },
+                    ] as Array<{ id: GlobalExamModality; shortLabel: string }>
+                  ).map((mod) => (
+                    <button
+                      key={mod.id}
+                      type="button"
+                      onClick={() => setExamModality(mod.id)}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-medium border transition-colors ${
+                        examModality === mod.id
+                          ? "bg-amber-500/20 border-amber-500/60 text-amber-300 font-bold"
+                          : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200"
+                      }`}
+                    >
+                      {mod.shortLabel}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-center pt-1">
+                <div className="md:col-span-2 space-y-1 text-xs">
+                  <div className="text-zinc-300 font-medium">
+                    {activeScenario.formulaDescription}
+                  </div>
+                  <div className="text-[11px] text-zinc-400">
+                    Nota presentación considerada:{" "}
+                    <strong className="font-mono text-zinc-200">
+                      {activeScenario.presentationGrade.toFixed(1)}
+                    </strong>{" "}
+                    • {activeScenario.eligibilityNote}
+                  </div>
+                  <div className="pt-1 text-xs">
+                    {activeScenario.requiredExamScore !== null &&
+                    activeScenario.isReachable ? (
+                      <span>
+                        Nota mínima necesaria en el Global / Recuperativo para
+                        aprobar:{" "}
+                        <strong className="font-mono text-sm text-amber-400">
+                          {activeScenario.requiredExamScore.toFixed(1)}
+                        </strong>
+                      </span>
+                    ) : (
+                      <span className="text-rose-400 font-medium">
+                        Con la nota de presentación actual se requeriría{" "}
+                        {activeScenario.requiredExamScore?.toFixed(1) ?? ">100"}{" "}
+                        (&gt; 100). Sube las evaluaciones pendientes primero.
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Input interactivo para probar nota en el Global */}
+                <div className="rounded-lg border border-zinc-800 bg-zinc-900/90 p-2.5 flex items-center justify-between gap-2">
+                  <div className="space-y-0.5">
+                    <label className="text-[10px] font-bold uppercase text-zinc-400 block">
+                      Simular Nota Global
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      placeholder={
+                        activeScenario.requiredExamScore !== null
+                          ? String(Math.round(activeScenario.requiredExamScore))
+                          : "60"
+                      }
+                      value={simulatedExamScore}
+                      onChange={(e) => setSimulatedExamScore(e.target.value)}
+                      className="w-20 h-7 px-2 text-center font-mono text-xs font-bold rounded bg-zinc-950 border border-zinc-700 text-amber-300 focus:border-amber-500 outline-none"
+                    />
+                  </div>
+
+                  <div className="text-right">
+                    <span className="text-[10px] uppercase text-zinc-400 block">
+                      NF Post-Global
+                    </span>
+                    <span
+                      className={`font-mono text-sm font-black ${
+                        projectedPostGlobalGrade === null
+                          ? "text-zinc-500"
+                          : projectedPostGlobalGrade >= formula.passingGrade
+                          ? "text-emerald-400"
+                          : "text-rose-400"
+                      }`}
+                    >
+                      {projectedPostGlobalGrade !== null
+                        ? projectedPostGlobalGrade.toFixed(1)
+                        : "—"}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
