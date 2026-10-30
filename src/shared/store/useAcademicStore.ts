@@ -21,10 +21,12 @@ import { calculateCurriculumGraph } from '@/curricula/prerequisites/graphUnlock'
 import { solveCourseStatus } from '@/wolfram-solver/engine/gradeSolver';
 import { solveSubFormulaCourse } from '@/wolfram-solver/engine/subFormulaSolver';
 import { sigaService } from '@/curricula/services/sigaService';
+import { curriculumService } from '@/curricula/services/curriculumService';
 
 export interface AcademicStoreState {
   // Curriculum configuration
   curriculum: CurriculumPlan;
+  activePlanId: string;
   selectedCourseSigla: string | null;
 
   // Persisted academic states
@@ -34,6 +36,8 @@ export interface AcademicStoreState {
 
   // Actions
   setSelectedCourse: (sigla: string | null) => void;
+  selectCurriculumPlan: (planId: string) => Promise<void>;
+  setSelectedParallel: (sigla: string, paralelo: string | undefined) => void;
   toggleCourseApproval: (sigla: string, grade?: number) => void;
   setCourseGrade: (sigla: string, grade: number) => void;
   enrollCourse: (sigla: string) => void;
@@ -88,7 +92,12 @@ const getSafeStorage = () => {
 export const useAcademicStore = create<AcademicStoreState>()(
   persist(
     (set, get) => ({
-      curriculum: ici2014Data as CurriculumPlan,
+      curriculum: {
+        ...(ici2014Data as CurriculumPlan),
+        sede: 'Casa Central Valparaíso',
+        jornada: 'Diurna',
+      },
+      activePlanId: '7313-2014',
       selectedCourseSigla: null,
       approvedCourses: {},
       inProgressCourses: {},
@@ -96,6 +105,30 @@ export const useAcademicStore = create<AcademicStoreState>()(
 
       setSelectedCourse: (sigla: string | null) => {
         set({ selectedCourseSigla: sigla });
+      },
+
+      selectCurriculumPlan: async (planId: string) => {
+        const plan = await curriculumService.getCurriculum(planId);
+        set({
+          activePlanId: planId,
+          curriculum: plan,
+          selectedCourseSigla: null,
+        });
+      },
+
+      setSelectedParallel: (sigla: string, paralelo: string | undefined) => {
+        const norm = sigla.trim().toUpperCase();
+        const current = get().inProgressCourses[norm];
+        if (!current) return;
+        set({
+          inProgressCourses: {
+            ...get().inProgressCourses,
+            [norm]: {
+              ...current,
+              selectedParallel: paralelo,
+            },
+          },
+        });
       },
 
       toggleCourseApproval: (sigla: string, grade?: number) => {
@@ -482,6 +515,7 @@ export const useAcademicStore = create<AcademicStoreState>()(
       name: 'sansano-academic-tracker-v1',
       storage: createJSONStorage(getSafeStorage),
       partialize: (state) => ({
+        activePlanId: state.activePlanId,
         approvedCourses: state.approvedCourses,
         inProgressCourses: state.inProgressCourses,
         milestones: state.milestones,

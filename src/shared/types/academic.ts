@@ -25,16 +25,96 @@ export interface Course {
   creditos_sct: number;
   area: string;
   prerrequisitos: string[];
+  departamento?: string;
+  requisito_licenciatura?: boolean;
+  horas?: {
+    teoricas: number;
+    practicas: number;
+    laboratorios: number;
+    ayudantias: number;
+  };
+  requisitos_dnf?: Array<Array<{ sigla: string; tipo?: string }>>;
+  equivalencias_dnf?: Array<Array<{ sigla: string }>>;
 }
 
 export interface CurriculumPlan {
   carrera: string;
   codigo_plan: string;
   plan: string;
+  sede?: string;
+  jornada?: string;
+  mencion?: string;
   universidad: string;
   escala_notas: GradeScale;
   areas: Record<string, AreaInfo>;
   ramos: Course[];
+}
+
+export interface ScheduleBlock {
+  dia: number; // 0 = Lunes .. 6 = Domingo
+  bloque: number; // 1 .. 16
+  tipo: string; // Cát, Lab, Ayu, Prá, Tal
+  sala: string;
+  campus: string;
+  profesor: string;
+}
+
+export interface CourseParallel {
+  sigla: string;
+  nombre: string;
+  departamento: string;
+  paralelo: string;
+  profesor: string[];
+  cupo: number;
+  horario: ScheduleBlock[];
+}
+
+export interface ProfessorMetricDetail {
+  avg: number;
+  safe_score: number;
+  stdev: number;
+  is_bimodal: boolean;
+  distribution: Record<string, number>;
+}
+
+export interface ProfessorReviewSummary {
+  id: string;
+  name: string;
+  meta: {
+    reviewCount: number;
+    effectiveCount: number;
+    lastUpdated: string;
+    isArchived: boolean;
+  };
+  stats: {
+    accesibilidad: ProfessorMetricDetail | null;
+    claridad_expositiva: ProfessorMetricDetail | null;
+    coherencia_evaluativa: ProfessorMetricDetail | null;
+    dificultad_percibida: ProfessorMetricDetail | null;
+    estabilidad_emocional: ProfessorMetricDetail | null;
+    gestion_tiempo: ProfessorMetricDetail | null;
+    rigor_calificatorio: ProfessorMetricDetail | null;
+  };
+  tags: Array<[string, number]>;
+  comments: Array<{
+    date: string;
+    tags: string[];
+    text: string;
+  }>;
+}
+
+export interface CareerPlanCatalogItem {
+  id: string; // unique composite id: e.g. "Casa Central Valparaíso|Diurna|73-1|0|10730000013"
+  sede: string;
+  jornada: string;
+  careerCode: string;
+  careerName: string;
+  mentionId: string;
+  mentionName: string;
+  planInternalId: string;
+  planCode: string;
+  semestersCount: number;
+  coursesCount: number;
 }
 
 export interface CourseStatusDetail {
@@ -94,6 +174,7 @@ export interface CourseFinalFormula {
 
 export interface EnrolledCourseConfig {
   sigla: string;
+  selectedParallel?: string;
   groups: EvaluationGroup[];
   formulaConfig?: CourseFinalFormula;
 }
