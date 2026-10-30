@@ -307,10 +307,10 @@ flowchart TD
     F3 --> F4[Fase 4: Exportación de Certificados & PDF]
 ```
 
-1. **Sincronización Automática con Portal SIGA USM:**
-   * Desarrollo de una extensión de navegador ligera o parser de historial académico (copiar y pegar texto de resumen académico o archivo HTML de SIGA).
-   * Relleno automático de asignaturas aprobadas, notas históricas registradas y ramos inscritos del semestre vigente.
-   * Cero almacenamiento externo: el parseo se ejecutará íntegramente en memoria en el cliente.
+1. **Sincronización Automática con Portal SIGA USM (Arquitectura Híbrida Documentada):**
+   * Ver especificación técnica detallada en [`docs/SIGA_SCRAPER_ARCHITECTURE.md`](./docs/SIGA_SCRAPER_ARCHITECTURE.md) y motor autónomo de respaldo en `scripts/siga-scraper/`.
+   * Modelo híbrido (Opción C): sincronización de catálogos JSON (`horario_asignaturas.json`, `planes_carreras.json`, `programas_academicos.json`, `professors_view.json`) vía CDN/GitHub Actions con fallback local y scraper Python autónomo en caso de contingencia.
+   * Cero almacenamiento externo: el parseo y estado del estudiante se ejecutan íntegramente en memoria en el cliente.
 2. **Catálogo Multi-Carrera y Nuevos Planes 2024:**
    * Soporte para el nuevo Plan 2024 de Ingeniería Civil Informática e incorporación de planes para Ingeniería Civil Industrial, Eléctrica, Mecánica, etc.
    * Selector dinámico de plan y carrera en la barra de navegación superior.
