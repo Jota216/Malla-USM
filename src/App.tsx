@@ -3,6 +3,7 @@ import { Navbar } from "@/frontend/components/layout/Navbar";
 import { Footer } from "@/frontend/components/layout/Footer";
 import { CurriculumGrid } from "@/frontend/components/curriculum/CurriculumGrid";
 import { SemesterSolver } from "@/frontend/components/solver/SemesterSolver";
+import { SemesterScheduleView } from "@/frontend/components/schedule/SemesterScheduleView";
 import { AnalyticsDashboard } from "@/frontend/components/analytics/AnalyticsDashboard";
 import { useAcademicStore } from "@/shared/store/useAcademicStore";
 
@@ -25,6 +26,12 @@ export default function App() {
         {activeTab === "curriculum" && (
           <div className="space-y-4 animate-in fade-in-50 duration-200">
             <CurriculumGrid onNavigateToSolver={handleNavigateToSolver} />
+          </div>
+        )}
+
+        {activeTab === "schedule" && (
+          <div className="space-y-4 animate-in fade-in-50 duration-200">
+            <SemesterScheduleView />
           </div>
         )}
 

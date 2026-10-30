@@ -28,6 +28,7 @@ import {
   MapPin,
   Check,
   Loader2,
+  Calendar,
 } from "lucide-react";
 
 interface NavbarProps {
@@ -265,6 +266,23 @@ export function Navbar({ activeTab, onTabChange }: NavbarProps) {
               >
                 {stats.approvedCoursesCount} / {stats.totalCoursesCount}
               </Badge>
+            </button>
+
+            <button
+              onClick={() => onTabChange("schedule")}
+              className={`flex items-center gap-2 px-3 sm:px-4 py-2 text-xs sm:text-sm font-semibold rounded-md transition-all whitespace-nowrap ${
+                activeTab === "schedule"
+                  ? "bg-[#002B49] text-white shadow-sm"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
+              }`}
+            >
+              <Calendar className="h-4 w-4" />
+              <span>Horario SIGA</span>
+              {stats.inProgressCoursesCount > 0 && (
+                <span className="inline-flex items-center justify-center px-1.5 py-0.2 text-[10px] font-bold rounded-full bg-[#D99B00] text-slate-900">
+                  {stats.inProgressCoursesCount}
+                </span>
+              )}
             </button>
 
             <button

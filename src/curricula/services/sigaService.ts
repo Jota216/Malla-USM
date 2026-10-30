@@ -4,6 +4,7 @@ import {
   GraduationMilestone,
   CourseParallel,
   ProfessorReviewSummary,
+  ScheduleBlock,
 } from '@/shared/types/academic';
 
 export interface SigaAuthCredentials {
@@ -101,6 +102,88 @@ export type RawProfessorsDataset = Record<string, ProfessorReviewSummary>;
 
 const CDN_BASE =
   'https://cdn.jsdelivr.net/gh/AlvinIsCrack/horario-usm@main/src/lib/data';
+
+export const USM_BAR_DAYS = [
+  'Lunes',
+  'Martes',
+  'Miércoles',
+  'Jueves',
+  'Viernes',
+  'Sábado',
+  'Domingo',
+];
+
+export const USM_BLOCK_PAIRS = [
+  { pair: '1-2', blocks: [1, 2], time: '08:15 - 09:25' },
+  { pair: '3-4', blocks: [3, 4], time: '09:40 - 10:50' },
+  { pair: '5-6', blocks: [5, 6], time: '11:05 - 12:15' },
+  { pair: '7-8', blocks: [7, 8], time: '12:30 - 13:40' },
+  { pair: '9-10', blocks: [9, 10], time: '14:40 - 15:50' },
+  { pair: '11-12', blocks: [11, 12], time: '16:05 - 17:15' },
+  { pair: '13-14', blocks: [13, 14], time: '17:30 - 18:40' },
+  { pair: '15-16', blocks: [15, 16], time: '18:55 - 20:05' },
+];
+
+/**
+ * Agrupa bloques consecutivos de un mismo día, tipo y sala (ej. bloque 1 y 2 -> "1-2")
+ * para mostrarlos de forma compacta en tarjetas y modales.
+ */
+export function groupScheduleBlocks(
+  blocks: ScheduleBlock[]
+): Array<{
+  dia: number;
+  bloqueRange: string;
+  tipo: string;
+  sala?: string;
+  campus?: string;
+}> {
+  if (!blocks || blocks.length === 0) return [];
+  const sorted = [...blocks].sort((a, b) =>
+    a.dia !== b.dia ? a.dia - b.dia : a.bloque - b.bloque
+  );
+
+  const grouped: Array<{
+    dia: number;
+    startBloque: number;
+    endBloque: number;
+    tipo: string;
+    sala?: string;
+    campus?: string;
+  }> = [];
+
+  for (const b of sorted) {
+    const prev = grouped[grouped.length - 1];
+    if (
+      prev &&
+      prev.dia === b.dia &&
+      prev.tipo === b.tipo &&
+      prev.sala === b.sala &&
+      b.bloque === prev.endBloque + 1
+    ) {
+      prev.endBloque = b.bloque;
+    } else {
+      grouped.push({
+        dia: b.dia,
+        startBloque: b.bloque,
+        endBloque: b.bloque,
+        tipo: b.tipo,
+        sala: b.sala,
+        campus: b.campus,
+      });
+    }
+  }
+
+  return grouped.map((g) => ({
+    dia: g.dia,
+    bloqueRange:
+      g.startBloque === g.endBloque
+        ? `${g.startBloque}`
+        : `${g.startBloque}-${g.endBloque}`,
+    tipo: g.tipo,
+    sala: g.sala,
+    campus: g.campus,
+  }));
+}
 
 /**
  * Normaliza una sigla eliminando guiones y espacios para cruzar entre nuestro formato (INF-292)
@@ -400,3 +483,33 @@ class SigaService {
 }
 
 export const sigaService = new SigaService();
+
+export async function getCourseParallels(
+  sigla: string,
+  sede?: string,
+  jornada?: string,
+  periodo?: string
+): Promise<CourseParallel[]> {
+  const res = await sigaService.getCourseParallels(sigla, sede, jornada, periodo);
+  return res.parallels;
+}
+
+export async function getSyllabusPdfUrl(
+  sigla: string,
+  sede?: string
+): Promise<string | null> {
+  return sigaService.getSyllabusPdfUrl(sigla, sede);
+}
+
+export async function getProfessorReview(
+  professorName: string
+): Promise<ProfessorReviewSummary | null> {
+  return sigaService.getProfessorReview(professorName);
+}
+
+export async function getSchedulePeriods(
+  sede?: string,
+  jornada?: string
+): Promise<string[]> {
+  return sigaService.getSchedulePeriods(sede, jornada);
+}

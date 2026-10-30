@@ -25,6 +25,7 @@ import {
   getCourseParallels,
   getProfessorReview,
   getSyllabusPdfUrl,
+  groupScheduleBlocks,
   USM_BAR_DAYS,
 } from "@/curricula/services/sigaService";
 import confetti from "canvas-confetti";
@@ -445,7 +446,7 @@ export function CourseDetailModal({
                     {/* Schedule Blocks */}
                     {par.horario && par.horario.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-1.5">
-                        {par.horario.map((b, idx) => (
+                        {groupScheduleBlocks(par.horario).map((b, idx) => (
                           <span
                             key={`${par.paralelo}-${idx}`}
                             className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-muted text-[11px] text-muted-foreground"
@@ -453,7 +454,7 @@ export function CourseDetailModal({
                             <Clock className="h-3 w-3 text-[#D99B00]" />
                             <strong className="text-foreground">
                               {USM_BAR_DAYS[b.dia]?.slice(0, 2) || `D${b.dia}`} B
-                              {b.bloque}-{b.bloque + 1}
+                              {b.bloqueRange}
                             </strong>
                             <span>({b.tipo})</span>
                             {b.sala && (
