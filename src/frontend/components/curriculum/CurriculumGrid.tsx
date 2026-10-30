@@ -25,8 +25,13 @@ interface CurriculumGridProps {
 }
 
 export function CurriculumGrid({ onNavigateToSolver }: CurriculumGridProps) {
-  const { curriculum, activePlanId, selectCurriculumPlan, getCoursesStatus } =
-    useAcademicStore();
+  const {
+    curriculum,
+    activePlanId,
+    selectCurriculumPlan,
+    toggleSemesterApproval,
+    getCoursesStatus,
+  } = useAcademicStore();
   const coursesStatus = getCoursesStatus();
 
   // Search & Filter state
@@ -356,6 +361,7 @@ export function CurriculumGrid({ onNavigateToSolver }: CurriculumGridProps) {
                 areas={areas}
                 onOpenDetail={handleOpenDetail}
                 onNavigateToSolver={onNavigateToSolver}
+                onToggleSemesterApproval={toggleSemesterApproval}
               />
             );
           })}

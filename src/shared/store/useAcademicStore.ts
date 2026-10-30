@@ -45,6 +45,7 @@ export interface AcademicStoreState {
   selectCurriculumPlan: (planId: string) => Promise<void>;
   setSelectedParallel: (sigla: string, paralelo: string | undefined) => void;
   toggleCourseApproval: (sigla: string, grade?: number) => void;
+  toggleSemesterApproval: (semesterNumber: number) => void;
   setCourseGrade: (sigla: string, grade: number) => void;
   enrollCourse: (sigla: string, options?: EnrollCourseOptions) => void;
   unenrollCourse: (sigla: string) => void;
@@ -163,6 +164,42 @@ export const useAcademicStore = create<AcademicStoreState>()(
             inProgressCourses: currentInProgress,
           });
         }
+      },
+
+      toggleSemesterApproval: (semesterNumber: number) => {
+        const semCourses = (get().curriculum.ramos || []).filter(
+          (r) => r.semestre === semesterNumber
+        );
+        if (semCourses.length === 0) return;
+
+        const currentApproved = { ...get().approvedCourses };
+        const currentInProgress = { ...get().inProgressCourses };
+        const allApproved = semCourses.every(
+          (r) => !!currentApproved[r.sigla.trim().toUpperCase()]
+        );
+
+        const now = new Date().toISOString();
+        for (const r of semCourses) {
+          const norm = r.sigla.trim().toUpperCase();
+          if (allApproved) {
+            delete currentApproved[norm];
+          } else {
+            if (!currentApproved[norm]) {
+              currentApproved[norm] = {
+                sigla: norm,
+                approvedAt: now,
+              };
+            }
+            if (currentInProgress[norm]) {
+              delete currentInProgress[norm];
+            }
+          }
+        }
+
+        set({
+          approvedCourses: currentApproved,
+          inProgressCourses: currentInProgress,
+        });
       },
 
       setCourseGrade: (sigla: string, grade: number) => {

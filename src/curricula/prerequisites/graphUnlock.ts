@@ -1,14 +1,65 @@
 import { Course, CourseStatusDetail } from '@/shared/types/academic';
+import { formatUsmSigla } from '@/curricula/services/sigaService';
 
 /**
- * Computes missing prerequisites for a given course against an approved set.
+ * Normaliza una sigla a formato estándar con guion y mayúsculas (ej. "MAT021" -> "MAT-021").
+ */
+function normSigla(s: string): string {
+  return formatUsmSigla(s.trim().toUpperCase());
+}
+
+/**
+ * Computes missing prerequisites for a given course against an approved set,
+ * evaluating both `course.prerrequisitos` and disjunctive `OR` clauses in `course.requisitos_dnf`
+ * as well as `course.equivalencias_dnf`.
  */
 export function getMissingPrerequisites(
   course: Course,
   approvedSiglas: Set<string> | string[]
 ): string[] {
-  const approvedSet = approvedSiglas instanceof Set ? approvedSiglas : new Set(approvedSiglas);
-  return course.prerrequisitos.filter((req) => !approvedSet.has(req.trim().toUpperCase()));
+  const rawSet = approvedSiglas instanceof Set ? approvedSiglas : new Set(approvedSiglas);
+  const approvedSet = new Set<string>();
+  for (const s of rawSet) {
+    approvedSet.add(s.trim().toUpperCase());
+    approvedSet.add(normSigla(s));
+  }
+
+  // 1. Si el ramo tiene una equivalencia DNF completamente aprobada, se considera desbloqueado
+  if (Array.isArray(course.equivalencias_dnf) && course.equivalencias_dnf.length > 0) {
+    const hasApprovedEquivalence = course.equivalencias_dnf.some(
+      (clause) =>
+        clause.length > 0 &&
+        clause.every((eq) => approvedSet.has(normSigla(eq.sigla)))
+    );
+    if (hasApprovedEquivalence) {
+      return [];
+    }
+  }
+
+  // 2. Evaluar prerrequisitos estándar del plan
+  const baseMissing = course.prerrequisitos.filter(
+    (req) => !approvedSet.has(req.trim().toUpperCase()) && !approvedSet.has(normSigla(req))
+  );
+  if (baseMissing.length === 0) {
+    return [];
+  }
+
+  // 3. Evaluar cláusulas disyuntivas (OR) de SIGA (`requisitos_dnf`) si existen
+  if (Array.isArray(course.requisitos_dnf) && course.requisitos_dnf.length > 0) {
+    for (const clause of course.requisitos_dnf) {
+      if (!Array.isArray(clause) || clause.length === 0) continue;
+      const clauseMissing = clause
+        .map((r) => normSigla(r.sigla))
+        .filter((s) => s !== normSigla(course.sigla) && !approvedSet.has(s));
+
+      // Si alguna cláusula OR se cumple por completo, el ramo queda disponible
+      if (clauseMissing.length === 0) {
+        return [];
+      }
+    }
+  }
+
+  return baseMissing;
 }
 
 /**
@@ -16,9 +67,19 @@ export function getMissingPrerequisites(
  */
 export function getUnlockedByCourse(sigla: string, allCourses: Course[]): Course[] {
   const normalizedSigla = sigla.trim().toUpperCase();
-  return allCourses.filter((c) =>
-    c.prerrequisitos.some((p) => p.trim().toUpperCase() === normalizedSigla)
-  );
+  const formattedTarget = normSigla(sigla);
+  return allCourses.filter((c) => {
+    const inBase = c.prerrequisitos.some(
+      (p) => p.trim().toUpperCase() === normalizedSigla || normSigla(p) === formattedTarget
+    );
+    if (inBase) return true;
+    if (Array.isArray(c.requisitos_dnf)) {
+      return c.requisitos_dnf.some((clause) =>
+        clause.some((r) => normSigla(r.sigla) === formattedTarget)
+      );
+    }
+    return false;
+  });
 }
 
 /**
@@ -50,14 +111,6 @@ export function getDirectlyUnlockedCoursesIfApproved(
     const courseSigla = course.sigla.trim().toUpperCase();
     // Cannot unlock a course that is already approved or enrolled
     if (approvedSet.has(courseSigla) || inProgressSet.has(courseSigla)) {
-      return false;
-    }
-
-    // Must have this target in prerequisites
-    const hasTargetInPrereqs = course.prerrequisitos.some(
-      (p) => p.trim().toUpperCase() === normalizedTarget
-    );
-    if (!hasTargetInPrereqs) {
       return false;
     }
 
@@ -104,10 +157,16 @@ export function getPrerequisiteChain(sigla: string, allCourses: Course[]): strin
  * Validates that the curriculum graph is a Directed Acyclic Graph (DAG) with no circular dependencies.
  * Returns true if valid (acyclic), false if cycle detected.
  */
-export function validateGraphAcyclic(allCourses: Course[]): { isAcyclic: boolean; cycleNodes?: string[] } {
+export function validateGraphAcyclic(allCourses: Course[]): {
+  isAcyclic: boolean;
+  cycleNodes?: string[];
+} {
   const adj = new Map<string, string[]>();
   for (const course of allCourses) {
-    adj.set(course.sigla.trim().toUpperCase(), course.prerrequisitos.map((p) => p.trim().toUpperCase()));
+    adj.set(
+      course.sigla.trim().toUpperCase(),
+      course.prerrequisitos.map((p) => p.trim().toUpperCase())
+    );
   }
 
   const visited = new Map<string, 0 | 1 | 2>(); // 0: unvisited, 1: visiting, 2: visited
@@ -167,6 +226,8 @@ export function calculateCurriculumGraph(
     }
   }
 
+  const approvedKeysSet = new Set(approvedMap.keys());
+
   const inProgressSet = new Set(
     (inProgressSiglas instanceof Set ? Array.from(inProgressSiglas) : inProgressSiglas).map((s) =>
       s.trim().toUpperCase()
@@ -201,10 +262,8 @@ export function calculateCurriculumGraph(
       continue;
     }
 
-    // 3. Prerequisite resolution for unapproved / not in-progress courses
-    const missing = course.prerrequisitos.filter(
-      (prereq) => !approvedMap.has(prereq.trim().toUpperCase())
-    );
+    // 3. Prerequisite resolution (supports OR clauses in requisitos_dnf & equivalencias_dnf)
+    const missing = getMissingPrerequisites(course, approvedKeysSet);
 
     if (missing.length === 0) {
       result[course.sigla] = {
