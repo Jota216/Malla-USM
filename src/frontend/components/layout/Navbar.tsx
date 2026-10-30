@@ -1,7 +1,10 @@
 import * as React from "react";
 import { useAcademicStore } from "@/shared/store/useAcademicStore";
+import { getCatalogPlans } from "@/curricula/services/curriculumService";
+import { CareerPlanCatalogItem } from "@/shared/types/academic";
 import { Badge } from "@/frontend/components/ui/badge";
 import { Button } from "@/frontend/components/ui/button";
+import { Input } from "@/frontend/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -20,6 +23,11 @@ import {
   BarChart3,
   Award,
   Sparkles,
+  ChevronDown,
+  Search,
+  MapPin,
+  Check,
+  Loader2,
 } from "lucide-react";
 
 interface NavbarProps {
@@ -28,15 +36,75 @@ interface NavbarProps {
 }
 
 export function Navbar({ activeTab, onTabChange }: NavbarProps) {
-  const { getStatistics, resetAll, curriculum } = useAcademicStore();
+  const {
+    getStatistics,
+    resetAll,
+    curriculum,
+    activePlanId,
+    selectCurriculumPlan,
+  } = useAcademicStore();
   const stats = getStatistics();
 
   const [backupOpen, setBackupOpen] = React.useState(false);
   const [resetDialogOpen, setResetDialogOpen] = React.useState(false);
+  const [careerDialogOpen, setCareerDialogOpen] = React.useState(false);
+
+  const [catalogPlans, setCatalogPlans] = React.useState<
+    CareerPlanCatalogItem[]
+  >([]);
+  const [loadingCatalog, setLoadingCatalog] = React.useState(false);
+  const [searchQuery, setSearchQuery] = React.useState("");
+  const [selectedSede, setSelectedSede] = React.useState<string>("TODAS");
+
+  React.useEffect(() => {
+    if (!careerDialogOpen || catalogPlans.length > 0) return;
+    let cancelled = false;
+    setLoadingCatalog(true);
+    getCatalogPlans()
+      .then((plans) => {
+        if (!cancelled) {
+          setCatalogPlans(plans);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoadingCatalog(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [careerDialogOpen, catalogPlans.length]);
+
+  const sedes = React.useMemo(() => {
+    const unique = Array.from(new Set(catalogPlans.map((p) => p.sede)));
+    return ["TODAS", ...unique];
+  }, [catalogPlans]);
+
+  const filteredPlans = React.useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return catalogPlans.filter((p) => {
+      if (selectedSede !== "TODAS" && p.sede !== selectedSede) {
+        return false;
+      }
+      if (!q) return true;
+      return (
+        p.carrera.toLowerCase().includes(q) ||
+        p.codigoCarrera.toLowerCase().includes(q) ||
+        p.sede.toLowerCase().includes(q) ||
+        p.plan.toLowerCase().includes(q)
+      );
+    });
+  }, [catalogPlans, selectedSede, searchQuery]);
 
   const handleConfirmReset = () => {
     resetAll();
     setResetDialogOpen(false);
+  };
+
+  const handleSelectPlan = async (planId: string) => {
+    await selectCurriculumPlan(planId);
+    setCareerDialogOpen(false);
   };
 
   return (
@@ -58,11 +126,29 @@ export function Navbar({ activeTab, onTabChange }: NavbarProps) {
                   USM
                 </span>
               </div>
-              <p className="text-xs text-muted-foreground flex items-center gap-1 font-medium">
-                <span>{curriculum.carrera}</span>
+              <button
+                type="button"
+                onClick={() => setCareerDialogOpen(true)}
+                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 font-medium group transition-colors text-left"
+                title="Cambiar carrera, sede o plan de estudios USM"
+              >
+                <span className="truncate max-w-[200px] sm:max-w-[320px] group-hover:underline">
+                  {curriculum.carrera}
+                </span>
+                {curriculum.sede && (
+                  <>
+                    <span className="text-slate-400">•</span>
+                    <span className="hidden md:inline text-[11px] text-muted-foreground">
+                      {curriculum.sede}
+                    </span>
+                  </>
+                )}
                 <span className="text-slate-400">•</span>
-                <span className="text-[#D99B00] font-semibold">Plan {curriculum.plan}</span>
-              </p>
+                <span className="text-[#D99B00] font-semibold">
+                  Plan {curriculum.plan}
+                </span>
+                <ChevronDown className="h-3.5 w-3.5 text-[#D99B00] group-hover:translate-y-0.5 transition-transform" />
+              </button>
             </div>
           </div>
 
@@ -71,7 +157,7 @@ export function Navbar({ activeTab, onTabChange }: NavbarProps) {
             {/* SCT Credits Badge */}
             <div
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border bg-card/60 shadow-xs hover:border-[#002B49]/40 transition-colors"
-              title="Créditos SCT aprobados vs totales requeridos (300 SCT)"
+              title="Créditos SCT aprobados vs totales requeridos"
             >
               <Award className="h-4 w-4 text-[#D99B00]" />
               <div className="flex flex-col text-left">
@@ -121,6 +207,17 @@ export function Navbar({ activeTab, onTabChange }: NavbarProps) {
 
             {/* Action Buttons */}
             <div className="flex items-center gap-1.5 ml-1">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCareerDialogOpen(true)}
+                className="h-8 gap-1.5 text-xs font-medium"
+                title="Cambiar carrera, sede o malla USM"
+              >
+                <GraduationCap className="h-3.5 w-3.5 text-[#D99B00]" />
+                <span className="hidden sm:inline">Carreras</span>
+              </Button>
+
               <Button
                 variant="outline"
                 size="sm"
@@ -204,6 +301,112 @@ export function Navbar({ activeTab, onTabChange }: NavbarProps) {
 
       {/* Backup Modal */}
       <DataBackupModal open={backupOpen} onOpenChange={setBackupOpen} />
+
+      {/* Career / Sede / Plan Selector Dialog */}
+      <Dialog open={careerDialogOpen} onOpenChange={setCareerDialogOpen}>
+        <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <GraduationCap className="h-5 w-5 text-[#D99B00]" />
+              <span>Seleccionar Carrera, Sede y Plan USM</span>
+            </DialogTitle>
+            <DialogDescription>
+              Catálogo oficial sincronizado con SIGA USM. Tus ramos aprobados compatibles por sigla se conservarán al cambiar de plan.
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Filters */}
+          <div className="space-y-2.5 py-2">
+            <div className="relative">
+              <Search className="h-4 w-4 absolute left-3 top-2.5 text-muted-foreground" />
+              <Input
+                placeholder="Buscar carrera (ej. Informática, Comercial, Mecánica, 7313)..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 h-9 text-xs sm:text-sm"
+              />
+            </div>
+
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {sedes.map((sede) => (
+                <button
+                  key={sede}
+                  type="button"
+                  onClick={() => setSelectedSede(sede)}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                    selectedSede === sede
+                      ? "bg-[#002B49] text-white dark:bg-[#D99B00] dark:text-slate-900"
+                      : "bg-muted text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {sede === "TODAS" ? "Todas las Sedes" : sede}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Plans List */}
+          <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 min-h-[260px] max-h-[420px]">
+            {loadingCatalog ? (
+              <div className="flex items-center justify-center py-12 gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Cargando planes de estudio de todas las sedes USM...</span>
+              </div>
+            ) : filteredPlans.length === 0 ? (
+              <div className="text-center py-10 text-xs text-muted-foreground">
+                No se encontraron planes que coincidan con tu búsqueda.
+              </div>
+            ) : (
+              filteredPlans.map((item) => {
+                const isCurrent = activePlanId === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => handleSelectPlan(item.id)}
+                    className={`w-full text-left p-2.5 rounded-lg border transition-all flex items-center justify-between gap-3 ${
+                      isCurrent
+                        ? "border-[#002B49] bg-[#002B49]/5 dark:border-[#D99B00] dark:bg-[#D99B00]/10"
+                        : "hover:border-muted-foreground/40 bg-card/50"
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <div className="font-semibold text-xs sm:text-sm text-foreground flex items-center gap-2 flex-wrap">
+                        <span>{item.carrera}</span>
+                        <Badge variant="outline" className="text-[10px] font-mono">
+                          Plan {item.plan}
+                        </Badge>
+                        {item.mencion && item.mencion !== "Sin Mención" && (
+                          <Badge variant="secondary" className="text-[10px]">
+                            {item.mencion}
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground flex items-center gap-2 mt-0.5 flex-wrap">
+                        <span className="inline-flex items-center gap-1">
+                          <MapPin className="h-3 w-3 text-[#D99B00]" />
+                          {item.sede}
+                        </span>
+                        <span>•</span>
+                        <span>Jornada {item.jornada}</span>
+                        <span>•</span>
+                        <span>{item.totalCourses} asignaturas</span>
+                      </div>
+                    </div>
+
+                    {isCurrent && (
+                      <Badge variant="success" className="shrink-0 gap-1 text-[10px]">
+                        <Check className="h-3 w-3" />
+                        Activo
+                      </Badge>
+                    )}
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Confirmation Dialog for Reset */}
       <Dialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
