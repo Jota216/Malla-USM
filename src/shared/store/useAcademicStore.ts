@@ -23,6 +23,12 @@ import { solveSubFormulaCourse } from '@/wolfram-solver/engine/subFormulaSolver'
 import { sigaService } from '@/curricula/services/sigaService';
 import { curriculumService } from '@/curricula/services/curriculumService';
 
+export interface EnrollCourseOptions {
+  customName?: string;
+  customCreditsSct?: number;
+  selectedParallel?: string;
+}
+
 export interface AcademicStoreState {
   // Curriculum configuration
   curriculum: CurriculumPlan;
@@ -40,7 +46,7 @@ export interface AcademicStoreState {
   setSelectedParallel: (sigla: string, paralelo: string | undefined) => void;
   toggleCourseApproval: (sigla: string, grade?: number) => void;
   setCourseGrade: (sigla: string, grade: number) => void;
-  enrollCourse: (sigla: string) => void;
+  enrollCourse: (sigla: string, options?: EnrollCourseOptions) => void;
   unenrollCourse: (sigla: string) => void;
   loadInf292Example: () => void;
   setEvaluationScore: (
@@ -96,6 +102,7 @@ export const useAcademicStore = create<AcademicStoreState>()(
         ...(ici2014Data as CurriculumPlan),
         sede: 'Casa Central Valparaíso',
         jornada: 'Diurna',
+        semestres_totales: 11,
       },
       activePlanId: '7313-2014',
       selectedCourseSigla: null,
@@ -170,14 +177,34 @@ export const useAcademicStore = create<AcademicStoreState>()(
         }
       },
 
-      enrollCourse: (sigla: string) => {
+      enrollCourse: (sigla: string, options?: EnrollCourseOptions) => {
         const norm = sigla.trim().toUpperCase();
         const currentInProgress = { ...get().inProgressCourses };
         const currentApproved = { ...get().approvedCourses };
 
         // If course is not enrolled, initialize with standard template
         if (!currentInProgress[norm]) {
-          currentInProgress[norm] = createDefaultCourseConfig(norm);
+          currentInProgress[norm] = {
+            ...createDefaultCourseConfig(norm),
+            ...(options?.customName ? { customName: options.customName } : {}),
+            ...(options?.customCreditsSct !== undefined
+              ? { customCreditsSct: options.customCreditsSct }
+              : {}),
+            ...(options?.selectedParallel
+              ? { selectedParallel: options.selectedParallel }
+              : {}),
+          };
+        } else if (options) {
+          currentInProgress[norm] = {
+            ...currentInProgress[norm],
+            ...(options.customName ? { customName: options.customName } : {}),
+            ...(options.customCreditsSct !== undefined
+              ? { customCreditsSct: options.customCreditsSct }
+              : {}),
+            ...(options.selectedParallel !== undefined
+              ? { selectedParallel: options.selectedParallel }
+              : {}),
+          };
         }
 
         // If it was marked as approved, un-approve it because it is being taken now
@@ -516,12 +543,24 @@ export const useAcademicStore = create<AcademicStoreState>()(
       storage: createJSONStorage(getSafeStorage),
       partialize: (state) => ({
         activePlanId: state.activePlanId,
+        curriculum: state.curriculum,
         approvedCourses: state.approvedCourses,
         inProgressCourses: state.inProgressCourses,
         milestones: state.milestones,
         selectedCourseSigla: state.selectedCourseSigla,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (state && state.activePlanId && state.activePlanId !== '7313-2014') {
+          curriculumService
+            .getCurriculum(state.activePlanId)
+            .then((plan) => {
+              useAcademicStore.setState({ curriculum: plan });
+            })
+            .catch(() => {
+              // Keeps persisted curriculum if offline
+            });
+        }
+      },
     }
   )
 );
-

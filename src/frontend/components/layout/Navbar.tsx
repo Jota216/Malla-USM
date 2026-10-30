@@ -56,6 +56,7 @@ export function Navbar({ activeTab, onTabChange }: NavbarProps) {
   const [loadingCatalog, setLoadingCatalog] = React.useState(false);
   const [searchQuery, setSearchQuery] = React.useState("");
   const [selectedSede, setSelectedSede] = React.useState<string>("TODAS");
+  const [selectedJornada, setSelectedJornada] = React.useState<string>("TODAS");
 
   React.useEffect(() => {
     if (!careerDialogOpen || catalogPlans.length > 0) return;
@@ -82,21 +83,30 @@ export function Navbar({ activeTab, onTabChange }: NavbarProps) {
     return ["TODAS", ...unique];
   }, [catalogPlans]);
 
+  const jornadas = React.useMemo(() => {
+    const unique = Array.from(new Set(catalogPlans.map((p) => p.jornada)));
+    return ["TODAS", ...unique];
+  }, [catalogPlans]);
+
   const filteredPlans = React.useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return catalogPlans.filter((p) => {
       if (selectedSede !== "TODAS" && p.sede !== selectedSede) {
         return false;
       }
+      if (selectedJornada !== "TODAS" && p.jornada !== selectedJornada) {
+        return false;
+      }
       if (!q) return true;
       return (
-        p.carrera.toLowerCase().includes(q) ||
-        p.codigoCarrera.toLowerCase().includes(q) ||
+        p.careerName.toLowerCase().includes(q) ||
+        p.careerCode.toLowerCase().includes(q) ||
         p.sede.toLowerCase().includes(q) ||
-        p.plan.toLowerCase().includes(q)
+        p.planCode.toLowerCase().includes(q) ||
+        p.mentionName.toLowerCase().includes(q)
       );
     });
-  }, [catalogPlans, selectedSede, searchQuery]);
+  }, [catalogPlans, selectedSede, selectedJornada, searchQuery]);
 
   const handleConfirmReset = () => {
     resetAll();
@@ -216,7 +226,7 @@ export function Navbar({ activeTab, onTabChange }: NavbarProps) {
                 title="Cambiar carrera, sede o malla USM"
               >
                 <GraduationCap className="h-3.5 w-3.5 text-[#D99B00]" />
-                <span className="hidden sm:inline">Carreras</span>
+                <span className="hidden sm:inline">Carreras ({catalogPlans.length || "USM"})</span>
               </Button>
 
               <Button
@@ -329,7 +339,7 @@ export function Navbar({ activeTab, onTabChange }: NavbarProps) {
               <span>Seleccionar Carrera, Sede y Plan USM</span>
             </DialogTitle>
             <DialogDescription>
-              Catálogo oficial sincronizado con SIGA USM. Tus ramos aprobados compatibles por sigla se conservarán al cambiar de plan.
+              Catálogo oficial sincronizado con SIGA USM ({filteredPlans.length} mallas disponibles). Tus ramos aprobados compatibles por sigla se conservarán al cambiar de plan.
             </DialogDescription>
           </DialogHeader>
 
@@ -338,28 +348,49 @@ export function Navbar({ activeTab, onTabChange }: NavbarProps) {
             <div className="relative">
               <Search className="h-4 w-4 absolute left-3 top-2.5 text-muted-foreground" />
               <Input
-                placeholder="Buscar carrera (ej. Informática, Comercial, Mecánica, 7313)..."
+                placeholder="Buscar carrera (ej. Informática, Comercial, Mecánica, Electrónica, Construcción)..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-9 h-9 text-xs sm:text-sm"
               />
             </div>
 
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {sedes.map((sede) => (
-                <button
-                  key={sede}
-                  type="button"
-                  onClick={() => setSelectedSede(sede)}
-                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-                    selectedSede === sede
-                      ? "bg-[#002B49] text-white dark:bg-[#D99B00] dark:text-slate-900"
-                      : "bg-muted text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {sede === "TODAS" ? "Todas las Sedes" : sede}
-                </button>
-              ))}
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {sedes.map((sede) => (
+                  <button
+                    key={sede}
+                    type="button"
+                    onClick={() => setSelectedSede(sede)}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                      selectedSede === sede
+                        ? "bg-[#002B49] text-white dark:bg-[#D99B00] dark:text-slate-900"
+                        : "bg-muted text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {sede === "TODAS" ? "Todas las Sedes" : sede}
+                  </button>
+                ))}
+              </div>
+
+              {jornadas.length > 2 && (
+                <div className="flex items-center gap-1">
+                  {jornadas.map((j) => (
+                    <button
+                      key={j}
+                      type="button"
+                      onClick={() => setSelectedJornada(j)}
+                      className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
+                        selectedJornada === j
+                          ? "bg-secondary text-secondary-foreground font-bold"
+                          : "bg-muted/60 text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {j === "TODAS" ? "Ambas Jornadas" : j}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -390,15 +421,16 @@ export function Navbar({ activeTab, onTabChange }: NavbarProps) {
                   >
                     <div className="min-w-0">
                       <div className="font-semibold text-xs sm:text-sm text-foreground flex items-center gap-2 flex-wrap">
-                        <span>{item.carrera}</span>
+                        <span>{item.careerName}</span>
                         <Badge variant="outline" className="text-[10px] font-mono">
-                          Plan {item.plan}
+                          Plan {item.planCode}
                         </Badge>
-                        {item.mencion && item.mencion !== "Sin Mención" && (
-                          <Badge variant="secondary" className="text-[10px]">
-                            {item.mencion}
-                          </Badge>
-                        )}
+                        {item.mentionName &&
+                          item.mentionName.toLowerCase() !== "sin mención" && (
+                            <Badge variant="secondary" className="text-[10px]">
+                              {item.mentionName}
+                            </Badge>
+                          )}
                       </div>
                       <div className="text-[11px] text-muted-foreground flex items-center gap-2 mt-0.5 flex-wrap">
                         <span className="inline-flex items-center gap-1">
@@ -408,7 +440,9 @@ export function Navbar({ activeTab, onTabChange }: NavbarProps) {
                         <span>•</span>
                         <span>Jornada {item.jornada}</span>
                         <span>•</span>
-                        <span>{item.totalCourses} asignaturas</span>
+                        <span>{item.semestersCount} semestres</span>
+                        <span>•</span>
+                        <span>{item.coursesCount} asignaturas</span>
                       </div>
                     </div>
 

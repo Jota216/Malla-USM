@@ -135,7 +135,6 @@ export function convertRawSigaPlanToCurriculum(
       // para mantener el DAG limpio y navegable
       const prereqsSet = new Set<string>();
       if (Array.isArray(rawCourse.requisitos) && rawCourse.requisitos.length > 0) {
-        // Buscar la primera cláusula AND cuyos ramos pertenezcan al plan
         const matchingGroup =
           rawCourse.requisitos.find((group) =>
             group.every((req) =>
@@ -175,6 +174,9 @@ export function convertRawSigaPlanToCurriculum(
       ? ` (${mention.nombre})`
       : '';
 
+  const totalSct = ramos.reduce((acc, r) => acc + (r.creditos_sct || 0), 0);
+  const totalUsm = ramos.reduce((acc, r) => acc + (r.creditos_usm || 0), 0);
+
   return {
     carrera: `${career.nombre}${mentionSuffix}`,
     codigo_plan: career.código,
@@ -183,6 +185,9 @@ export function convertRawSigaPlanToCurriculum(
     jornada: career.jornada,
     mencion: mention.nombre,
     universidad: 'Universidad Técnica Federico Santa María',
+    semestres_totales: planObj.malla.length,
+    creditos_totales_sct: totalSct,
+    creditos_totales_usm: totalUsm,
     escala_notas: { minima: 0, maxima: 100, aprobacion: 55 },
     areas: DEFAULT_AREAS,
     ramos,
@@ -198,6 +203,7 @@ class CurriculumService {
       ...(ici2014Data as CurriculumPlan),
       sede: 'Casa Central Valparaíso',
       jornada: 'Diurna',
+      semestres_totales: 11,
     });
   }
 
@@ -310,3 +316,7 @@ class CurriculumService {
 }
 
 export const curriculumService = new CurriculumService();
+
+export async function getCatalogPlans(): Promise<CareerPlanCatalogItem[]> {
+  return curriculumService.getCatalogPlans();
+}

@@ -26,6 +26,7 @@ export interface Course {
   area: string;
   prerrequisitos: string[];
   departamento?: string;
+  programa_pdf?: string;
   requisito_licenciatura?: boolean;
   horas?: {
     teoricas: number;
@@ -45,6 +46,9 @@ export interface CurriculumPlan {
   jornada?: string;
   mencion?: string;
   universidad: string;
+  semestres_totales?: number;
+  creditos_totales_sct?: number;
+  creditos_totales_usm?: number;
   escala_notas: GradeScale;
   areas: Record<string, AreaInfo>;
   ramos: Course[];
@@ -175,6 +179,8 @@ export interface CourseFinalFormula {
 export interface EnrolledCourseConfig {
   sigla: string;
   selectedParallel?: string;
+  customName?: string;
+  customCreditsSct?: number;
   groups: EvaluationGroup[];
   formulaConfig?: CourseFinalFormula;
 }
@@ -317,4 +323,3 @@ export interface AcademicStatistics {
   inProgressCoursesCount: number;
   totalCoursesCount: number;
 }
-
