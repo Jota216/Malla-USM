@@ -15,7 +15,6 @@ import {
   DropdownMenuTrigger,
 } from "@/frontend/components/ui/dropdown-menu";
 import { getUnlockedByCourse } from "@/curricula/prerequisites/graphUnlock";
-import confetti from "canvas-confetti";
 import {
   CheckCircle2,
   Lock,
@@ -69,24 +68,12 @@ export function CourseCard({
       return;
     }
 
-    if (status === "AVAILABLE" || status === "IN_PROGRESS") {
-      confetti({
-        particleCount: 50,
-        spread: 50,
-        origin: { y: 0.7 },
-      });
-      toggleCourseApproval(course.sigla);
-    } else if (status === "APPROVED") {
+    if (status === "AVAILABLE" || status === "IN_PROGRESS" || status === "APPROVED") {
       toggleCourseApproval(course.sigla);
     }
   };
 
   const handleQuickApproveGrade = (customGrade?: number) => {
-    confetti({
-      particleCount: 60,
-      spread: 60,
-      origin: { y: 0.7 },
-    });
     toggleCourseApproval(course.sigla, customGrade);
   };
 

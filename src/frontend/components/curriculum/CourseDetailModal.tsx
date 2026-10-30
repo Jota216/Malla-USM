@@ -28,7 +28,6 @@ import {
   groupScheduleBlocks,
   USM_BAR_DAYS,
 } from "@/curricula/services/sigaService";
-import confetti from "canvas-confetti";
 import {
   CheckCircle2,
   Lock,
@@ -164,13 +163,6 @@ export function CourseDetailModal({
   const selectedParallel = enrolledConfig?.selectedParallel;
 
   const handleToggleApprove = () => {
-    if (status !== "APPROVED") {
-      confetti({
-        particleCount: 70,
-        spread: 60,
-        origin: { y: 0.6 },
-      });
-    }
     const numGrade = inputGrade.trim() !== "" ? Number(inputGrade) : undefined;
     toggleCourseApproval(course.sigla, numGrade);
   };
@@ -481,23 +473,29 @@ export function CourseDetailModal({
                         >
                           <div className="flex items-center justify-between flex-wrap gap-2">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400">
-                                <Star className="h-3 w-3 fill-current" />
-                                Claridad:{" "}
-                                {rev.stats.claridad_expositiva?.mean.toFixed(1)}/5
-                              </span>
-                              <span className="text-[11px] text-muted-foreground">
-                                • Dificultad:{" "}
-                                <strong>
-                                  {rev.stats.dificultad_percibida?.mean.toFixed(1)}/5
-                                </strong>
-                              </span>
-                              <span className="text-[11px] text-muted-foreground">
-                                • Accesibilidad:{" "}
-                                <strong>
-                                  {rev.stats.accesibilidad?.mean.toFixed(1)}/5
-                                </strong>
-                              </span>
+                              {rev.stats.claridad_expositiva && (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400">
+                                  <Star className="h-3 w-3 fill-current" />
+                                  Claridad:{" "}
+                                  {rev.stats.claridad_expositiva.avg.toFixed(1)}/5
+                                </span>
+                              )}
+                              {rev.stats.dificultad_percibida && (
+                                <span className="text-[11px] text-muted-foreground">
+                                  • Dificultad:{" "}
+                                  <strong>
+                                    {rev.stats.dificultad_percibida.avg.toFixed(1)}/5
+                                  </strong>
+                                </span>
+                              )}
+                              {rev.stats.accesibilidad && (
+                                <span className="text-[11px] text-muted-foreground">
+                                  • Accesibilidad:{" "}
+                                  <strong>
+                                    {rev.stats.accesibilidad.avg.toFixed(1)}/5
+                                  </strong>
+                                </span>
+                              )}
                             </div>
 
                             {rev.comments && rev.comments.length > 0 && (
@@ -525,12 +523,12 @@ export function CourseDetailModal({
                           {/* Tags */}
                           {rev.tags && rev.tags.length > 0 && (
                             <div className="flex flex-wrap gap-1">
-                              {rev.tags.slice(0, 4).map(([tag, count]) => (
+                              {rev.tags.slice(0, 4).map(([tag]) => (
                                 <span
                                   key={tag}
                                   className="px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-700 dark:text-amber-300 text-[10px]"
                                 >
-                                  {tag} ({count})
+                                  {tag.replace(/_/g, " ")}
                                 </span>
                               ))}
                             </div>
@@ -544,7 +542,7 @@ export function CourseDetailModal({
                                   key={cIdx}
                                   className="text-[11px] text-muted-foreground italic border-l-2 border-[#D99B00] pl-2"
                                 >
-                                  &ldquo;{comment}&rdquo;
+                                  &ldquo;{comment.text}&rdquo;
                                 </p>
                               ))}
                             </div>
