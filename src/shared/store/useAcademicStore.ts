@@ -13,6 +13,7 @@ import {
 import ici2014Data from '@/curricula/careers/ici-2014.json';
 import {
   createDefaultCourseConfig,
+  createSmartCourseConfig,
   DEFAULT_GRADUATION_MILESTONES,
   createInf292ExampleScenario,
   ensureFormulaConfig,
@@ -181,11 +182,13 @@ export const useAcademicStore = create<AcademicStoreState>()(
         const norm = sigla.trim().toUpperCase();
         const currentInProgress = { ...get().inProgressCourses };
         const currentApproved = { ...get().approvedCourses };
+        const courseFromMalla =
+          get().curriculum.ramos.find((r) => r.sigla.toUpperCase() === norm) || null;
 
-        // If course is not enrolled, initialize with standard template
+        // If course is not enrolled, initialize with SIGA official formula or smart departmental template
         if (!currentInProgress[norm]) {
           currentInProgress[norm] = {
-            ...createDefaultCourseConfig(norm),
+            ...createSmartCourseConfig(norm, courseFromMalla),
             ...(options?.customName ? { customName: options.customName } : {}),
             ...(options?.customCreditsSct !== undefined
               ? { customCreditsSct: options.customCreditsSct }
@@ -421,11 +424,19 @@ export const useAcademicStore = create<AcademicStoreState>()(
 
       resetToTemplate: (sigla: string) => {
         const norm = sigla.trim().toUpperCase();
-        if (get().inProgressCourses[norm]) {
+        const current = get().inProgressCourses[norm];
+        if (current) {
+          const courseFromMalla =
+            get().curriculum.ramos.find((r) => r.sigla.toUpperCase() === norm) || null;
           set({
             inProgressCourses: {
               ...get().inProgressCourses,
-              [norm]: createDefaultCourseConfig(norm),
+              [norm]: {
+                ...createSmartCourseConfig(norm, courseFromMalla),
+                selectedParallel: current.selectedParallel,
+                customName: current.customName,
+                customCreditsSct: current.customCreditsSct,
+              },
             },
           });
         }
