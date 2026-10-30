@@ -13,7 +13,7 @@ Aplicación web interactiva de código abierto diseñada para estudiantes de tod
 * **Solver de Notas (Estilo WolframAlpha):** Configura las ponderaciones de tus ramos en curso, ingresa tus notas parciales y despeja automáticamente cuánto necesitas en los certámenes, controles o laboratorios restantes para llegar al **55**.
 * **100% Privado y Sin Servidor:** Todo tu progreso se guarda localmente en tu navegador (`localStorage`), con opción de exportar e importar tu respaldo en formato `.json`.
 
-## Arquitectura Híbrida de Datos SIGA (Opción C + Respaldo Autónomo)
+## Arquitectura Híbrida de Datos SIGA
 
 El sistema implementa una arquitectura de triple respaldo para asegurar disponibilidad continua sin exponer credenciales en el navegador:
 
