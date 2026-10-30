@@ -10,6 +10,11 @@ import {
   computeGlobalExamScenarios,
   GlobalExamModality,
 } from "@/wolfram-solver/engine/subFormulaSolver";
+import {
+  buildFormulaExpression,
+  getOfficialSigaFormula,
+  inferCourseFormulaConfig,
+} from "@/wolfram-solver/templates/formulaPresets";
 import { sigaService } from "@/curricula/services/sigaService";
 import { FormulaEditorModal } from "./FormulaEditorModal";
 import { Card, CardHeader, CardContent } from "@/frontend/components/ui/card";
@@ -26,6 +31,8 @@ import {
   FileText,
   Sparkles,
   LifeBuoy,
+  RotateCcw,
+  PlusCircle,
 } from "lucide-react";
 
 interface CourseSolverCardProps {
@@ -99,6 +106,23 @@ export function CourseSolverCard({
   );
   const [simulatedExamScore, setSimulatedExamScore] = React.useState<string>("");
 
+  const hasActiveBonuses = React.useMemo(() => {
+    const mult = formula.finalGradeMultiplier ?? 1;
+    const gBonus = formula.finalGradeBonusPoints ?? 0;
+    const bBonus = (formula.subFormulas || []).some(
+      (b) => (b.bonusPoints ?? 0) !== 0 || (b.evalBonusPoints ?? 0) !== 0
+    );
+    return Math.abs(mult - 1) > 0.001 || Math.abs(gBonus) > 0.001 || bBonus;
+  }, [formula]);
+
+  const [showBonusPanel, setShowBonusPanel] = React.useState<boolean>(hasActiveBonuses);
+
+  React.useEffect(() => {
+    if (hasActiveBonuses) {
+      setShowBonusPanel(true);
+    }
+  }, [hasActiveBonuses]);
+
   const [resolvedPdfUrl, setResolvedPdfUrl] = React.useState<string | null>(
     formula.syllabusPdfUrl || courseInfo?.programa_pdf || null
   );
@@ -120,6 +144,79 @@ export function CourseSolverCard({
 
   const blocks = formula.subFormulas || [];
 
+  const hasOfficialCatalogFormula = React.useMemo(
+    () => !!getOfficialSigaFormula(sigla),
+    [sigla]
+  );
+
+  const handleQuickRestoreOfficial = () => {
+    if (!onUpdateFormula) return;
+    const inferred = inferCourseFormulaConfig(sigla, courseInfo);
+    const mergedBlocks = inferred.subFormulas.map((newB) => {
+      const oldB = blocks.find(
+        (b) => b.code.toUpperCase() === newB.code.toUpperCase() || b.id === newB.id
+      );
+      if (!oldB) return newB;
+      return {
+        ...newB,
+        bonusPoints: oldB.bonusPoints,
+        evalBonusPoints: oldB.evalBonusPoints,
+        evaluations: newB.evaluations.map((ev, i) => ({
+          ...ev,
+          score:
+            oldB.evaluations[i]?.score !== undefined
+              ? oldB.evaluations[i].score
+              : null,
+        })),
+      };
+    });
+    onUpdateFormula(sigla, {
+      ...inferred,
+      finalGradeMultiplier: formula.finalGradeMultiplier,
+      finalGradeBonusPoints: formula.finalGradeBonusPoints,
+      subFormulas: mergedBlocks,
+    });
+  };
+
+  const handleUpdateBlockBonus = (
+    blockId: string,
+    field: "bonusPoints" | "evalBonusPoints",
+    val: number
+  ) => {
+    if (!onUpdateFormula) return;
+    const updatedBlocks = blocks.map((b) =>
+      b.id === blockId ? { ...b, [field]: val } : b
+    );
+    onUpdateFormula(sigla, {
+      ...formula,
+      expression: buildFormulaExpression(
+        updatedBlocks,
+        formula.piecewiseAlpha,
+        formula.finalGradeMultiplier,
+        formula.finalGradeBonusPoints
+      ),
+      subFormulas: updatedBlocks,
+    });
+  };
+
+  const handleUpdateGlobalModifiers = (
+    nextMultiplier: number,
+    nextBonusPoints: number
+  ) => {
+    if (!onUpdateFormula) return;
+    onUpdateFormula(sigla, {
+      ...formula,
+      finalGradeMultiplier: nextMultiplier,
+      finalGradeBonusPoints: nextBonusPoints,
+      expression: buildFormulaExpression(
+        blocks,
+        formula.piecewiseAlpha,
+        nextMultiplier,
+        nextBonusPoints
+      ),
+    });
+  };
+
   // Calculate total unknowns (Z) and guaranteed points with 0 in remaining (X)
   const totalUnknowns = blocks.reduce(
     (acc, b) =>
@@ -140,12 +237,15 @@ export function CourseSolverCard({
   }, [blocks]);
 
   const accumulatedPointsWithZero = React.useMemo(() => {
+    if (solveResult.minPossibleGrade !== undefined) {
+      return solveResult.minPossibleGrade;
+    }
     return solveResult.blocks.reduce(
       (acc, b, idx) =>
         acc + normalizedWeights[idx] * (b.projectedAverageWithZero ?? 0),
       0
     );
-  }, [solveResult.blocks, normalizedWeights]);
+  }, [solveResult.minPossibleGrade, solveResult.blocks, normalizedWeights]);
 
   const X = accumulatedPointsWithZero;
   const Y = solveResult.requiredUniformGrade;
@@ -194,12 +294,20 @@ export function CourseSolverCard({
 
   // Build the stylized monospace formula string
   const formulaEquation = React.useMemo(() => {
-    const parts = blocks.map((b, idx) => {
-      const w = normalizedWeights[idx];
-      return `${w.toFixed(2)} * ${b.code}`;
-    });
-    return `NF = ${parts.join(" + ")} (Meta: ≥ ${formula.passingGrade})`;
-  }, [blocks, normalizedWeights, formula.passingGrade]);
+    const expr = buildFormulaExpression(
+      blocks,
+      formula.piecewiseAlpha,
+      formula.finalGradeMultiplier,
+      formula.finalGradeBonusPoints
+    );
+    return `NF = ${expr} (Meta: ≥ ${formula.passingGrade})`;
+  }, [
+    blocks,
+    formula.piecewiseAlpha,
+    formula.finalGradeMultiplier,
+    formula.finalGradeBonusPoints,
+    formula.passingGrade,
+  ]);
 
   const conditionString = React.useMemo(() => {
     const mins = blocks.filter((b) => b.minGradeRequired !== null);
@@ -245,17 +353,33 @@ export function CourseSolverCard({
               variant="outline"
               className={`text-[10px] font-medium gap-1 ${
                 formula.source === "siga_pdf"
-                  ? "border-amber-500/40 bg-amber-950/30 text-amber-300"
+                  ? "border-emerald-500/40 bg-emerald-950/30 text-emerald-300"
                   : formula.source === "custom"
                   ? "border-blue-500/40 bg-blue-950/30 text-blue-300"
-                  : "border-zinc-700 bg-zinc-950/60 text-zinc-300"
+                  : "border-amber-500/40 bg-amber-950/30 text-amber-300"
               }`}
-              title="Origen de los requisitos de evaluación cargados para esta asignatura"
+              title="Nivel de certeza / origen de los requisitos de evaluación cargados para esta asignatura"
             >
               <Sparkles className="h-2.5 w-2.5 text-amber-400" />
               <span>{formula.sourceLabel}</span>
             </Badge>
           )}
+
+          {formula.source !== "siga_pdf" &&
+            hasOfficialCatalogFormula &&
+            onUpdateFormula && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleQuickRestoreOfficial}
+                className="h-6 px-2 text-[10px] font-semibold text-emerald-300 border-emerald-500/40 bg-emerald-950/30 hover:bg-emerald-950/60 gap-1"
+                title="Restaurar la fórmula oficial extraída del Programa PDF de SIGA conservando tus notas"
+              >
+                <RotateCcw className="h-2.5 w-2.5 text-emerald-400" />
+                <span>Usar Fórmula Oficial SIGA</span>
+              </Button>
+            )}
 
           {isApproved && (
             <Badge className="bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 text-xs gap-1 font-bold">
@@ -341,6 +465,8 @@ export function CourseSolverCard({
                 (b) => b.blockId === block.id
               );
               const avg = bResult?.currentAverage;
+              const effWeight = bResult?.weightInFinal ?? block.weightInFinal;
+              const effBonus = bResult?.effectiveBonusPoints ?? 0;
               const minReq = block.minGradeRequired;
               const hasMin = minReq !== null;
               const meetsMin = bResult?.meetsMinGrade ?? false;
@@ -366,15 +492,21 @@ export function CourseSolverCard({
                   className="rounded-lg border border-zinc-800/90 bg-zinc-950/50 p-2.5 flex flex-col justify-between gap-1.5 text-xs shadow-xs"
                 >
                   <div className="flex items-center justify-between gap-1">
-                    <span className="font-mono font-bold text-amber-400 dark:text-amber-300">
-                      {block.code}
-                    </span>
-                    <span className="text-[10px] font-semibold text-zinc-400">
-                      {Math.round(
-                        block.weightInFinal *
-                          (block.weightInFinal <= 1 ? 100 : 1)
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono font-bold text-amber-400 dark:text-amber-300">
+                        {block.code}
+                      </span>
+                      {effBonus > 0 && (
+                        <span
+                          className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-700/60"
+                          title={`Incluye +${effBonus.toFixed(1)} pts extra por actividades en este bloque`}
+                        >
+                          +{effBonus.toFixed(1)} pts
+                        </span>
                       )}
-                      %
+                    </div>
+                    <span className="text-[10px] font-semibold text-zinc-400">
+                      {Math.round(effWeight * (effWeight <= 1 ? 100 : 1))}%
                     </span>
                   </div>
 
@@ -440,8 +572,21 @@ export function CourseSolverCard({
         {/* 3. Final Formula & Official Requirements Line */}
         <div className="rounded-lg bg-zinc-950/80 border border-zinc-800/80 px-3 py-2.5 space-y-1.5 text-xs">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 font-mono">
-            <div className="text-zinc-200 font-medium tracking-tight">
+            <div className="flex flex-wrap items-center gap-2 text-zinc-200 font-medium tracking-tight">
               <span className="text-amber-400 font-bold">{formulaEquation}</span>
+
+              {formula.piecewiseAlpha && (
+                <span
+                  className="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/40"
+                  title="Ponderación dinámica por tramos según promedio de Certámenes (PC)"
+                >
+                  α(PC) = {(solveResult.dynamicAlpha ?? 0.3).toFixed(2)} →{" "}
+                  {Math.round((1 - (solveResult.dynamicAlpha ?? 0.3)) * 100)}%{" "}
+                  {formula.piecewiseAlpha.baseBlockCode} +{" "}
+                  {Math.round((solveResult.dynamicAlpha ?? 0.3) * 100)}%{" "}
+                  {formula.piecewiseAlpha.targetBlockCode}
+                </span>
+              )}
             </div>
 
             {conditionString && (
@@ -462,20 +607,252 @@ export function CourseSolverCard({
           )}
         </div>
 
-        {/* 4. Grade Grid (Numeric Inputs) */}
+        {/* 4. Grade Grid (Numeric Inputs) + Bonificaciones / Multiplicador */}
         <div className="space-y-3 pt-1">
-          <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 flex items-center justify-between">
-            <span>Grilla de Evaluaciones</span>
-            <span className="text-zinc-500 text-[10px] font-normal">
-              Escala 0 – 100 • Deja vacío (—) para incógnita
-            </span>
+          <div className="text-[11px] font-bold uppercase tracking-wider text-zinc-400 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span>Grilla de Evaluaciones</span>
+              <span className="text-zinc-500 text-[10px] font-normal normal-case">
+                (Escala 0 – 100 • Vacío = incógnita)
+              </span>
+            </div>
+
+            {onUpdateFormula && (
+              <button
+                type="button"
+                onClick={() => setShowBonusPanel((v) => !v)}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold normal-case tracking-normal border transition-colors ${
+                  hasActiveBonuses
+                    ? "bg-emerald-950/60 border-emerald-600/60 text-emerald-300 hover:bg-emerald-900/60"
+                    : "bg-zinc-950/80 border-zinc-800 text-amber-300 hover:bg-zinc-800"
+                }`}
+                title="Agregar puntos extra por actividades externas (a certámenes o nota final) o multiplicador de nota final"
+              >
+                <PlusCircle className="h-3.5 w-3.5 text-amber-400" />
+                <span>
+                  {hasActiveBonuses
+                    ? "Bonificaciones / Multiplicador Activo"
+                    : "Puntos Extra / Multiplicador"}
+                </span>
+              </button>
+            )}
           </div>
+
+          {/* Panel rápido de Bonificaciones por Actividades Externas y Multiplicador de Nota Final */}
+          {showBonusPanel && onUpdateFormula && (
+            <div className="rounded-xl border border-amber-500/30 bg-zinc-950/85 p-3 space-y-3 text-xs animate-in fade-in-50 duration-150">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800/80 pb-2">
+                <div className="flex items-center gap-1.5 font-bold text-amber-300">
+                  <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+                  <span>
+                    Puntos Extra por Actividades Externas y Multiplicador de Nota Final
+                  </span>
+                </div>
+                <span className="text-[11px] text-zinc-400">
+                  Se descuentan automáticamente de la nota necesaria en lo restante
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {/* 1. Puntos extra a Certamen / Evaluación individual por bloque */}
+                <div className="rounded-lg border border-zinc-800/90 bg-zinc-900/60 p-2.5 space-y-2">
+                  <div className="font-semibold text-zinc-200 text-[11px]">
+                    1. Puntos Extra a Certámenes / Bloques
+                  </div>
+                  <p className="text-[10px] text-zinc-400 leading-snug">
+                    Si el profesor da puntos para un certamen (se divide en N eval.) o directo al promedio del bloque:
+                  </p>
+                  <div className="space-y-1.5 pt-0.5">
+                    {blocks.map((b) => {
+                      const usedN =
+                        b.type === "drop_worst"
+                          ? Math.max(
+                              1,
+                              (b.count || b.evaluations.length) -
+                                (b.dropWorstCount || 0)
+                            )
+                          : Math.max(1, b.count || b.evaluations.length);
+                      return (
+                        <div
+                          key={b.id}
+                          className="flex items-center justify-between gap-1.5 text-[11px] bg-zinc-950/70 px-2 py-1 rounded border border-zinc-800/80"
+                        >
+                          <span className="font-mono font-bold text-amber-400">
+                            {b.code}
+                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <label
+                              className="text-[10px] text-zinc-400 flex items-center gap-1"
+                              title={`Puntos extra a 1 evaluación de ${b.name} (aporta +pts/${usedN} al promedio ${b.code})`}
+                            >
+                              <span>+Eval:</span>
+                              <input
+                                type="number"
+                                min={0}
+                                max={100}
+                                step={1}
+                                value={b.evalBonusPoints ?? 0}
+                                onChange={(e) =>
+                                  handleUpdateBlockBonus(
+                                    b.id,
+                                    "evalBonusPoints",
+                                    Math.max(0, Number(e.target.value) || 0)
+                                  )
+                                }
+                                className="w-12 h-6 text-center font-mono text-xs rounded bg-zinc-900 border border-zinc-700 text-emerald-300 focus:border-amber-500 outline-none"
+                              />
+                            </label>
+                            <label
+                              className="text-[10px] text-zinc-400 flex items-center gap-1"
+                              title={`Puntos extra sumados directamente al promedio de ${b.name} (${b.code})`}
+                            >
+                              <span>+Prom:</span>
+                              <input
+                                type="number"
+                                min={0}
+                                max={50}
+                                step={0.5}
+                                value={b.bonusPoints ?? 0}
+                                onChange={(e) =>
+                                  handleUpdateBlockBonus(
+                                    b.id,
+                                    "bonusPoints",
+                                    Math.max(0, Number(e.target.value) || 0)
+                                  )
+                                }
+                                className="w-12 h-6 text-center font-mono text-xs rounded bg-zinc-900 border border-zinc-700 text-emerald-300 focus:border-amber-500 outline-none"
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 2. Puntos extra directos a la Nota Final (NF) */}
+                <div className="rounded-lg border border-zinc-800/90 bg-zinc-900/60 p-2.5 flex flex-col justify-between space-y-2">
+                  <div className="space-y-1">
+                    <div className="font-semibold text-zinc-200 text-[11px]">
+                      2. Puntos Extra directos a Nota Final (NF)
+                    </div>
+                    <p className="text-[10px] text-zinc-400 leading-snug">
+                      Puntos por talleres, charlas, asistencia o actividades que se suman directo a la NF (escala 0–100):
+                    </p>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 pt-1">
+                    <div className="flex gap-1">
+                      {[0, 2, 3, 5].map((presetPts) => (
+                        <button
+                          key={presetPts}
+                          type="button"
+                          onClick={() =>
+                            handleUpdateGlobalModifiers(
+                              formula.finalGradeMultiplier ?? 1,
+                              presetPts
+                            )
+                          }
+                          className={`px-2 py-1 rounded text-[10px] font-mono font-bold border transition-colors ${
+                            (formula.finalGradeBonusPoints ?? 0) === presetPts
+                              ? "bg-emerald-950/80 border-emerald-500/60 text-emerald-300"
+                              : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200"
+                          }`}
+                        >
+                          +{presetPts}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[11px] font-mono text-emerald-400 font-bold">
+                        +
+                      </span>
+                      <input
+                        type="number"
+                        min={-20}
+                        max={50}
+                        step={0.5}
+                        value={formula.finalGradeBonusPoints ?? 0}
+                        onChange={(e) =>
+                          handleUpdateGlobalModifiers(
+                            formula.finalGradeMultiplier ?? 1,
+                            Number(e.target.value) || 0
+                          )
+                        }
+                        className="w-14 h-7 text-center font-mono text-xs font-bold rounded bg-zinc-950 border border-zinc-700 text-emerald-300 focus:border-amber-500 outline-none"
+                      />
+                      <span className="text-[10px] text-zinc-400">pts</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. Multiplicador a la Nota Final */}
+                <div className="rounded-lg border border-zinc-800/90 bg-zinc-900/60 p-2.5 flex flex-col justify-between space-y-2">
+                  <div className="space-y-1">
+                    <div className="font-semibold text-zinc-200 text-[11px]">
+                      3. Multiplicador a la Nota Final (× Factor)
+                    </div>
+                    <p className="text-[10px] text-zinc-400 leading-snug">
+                      Factor multiplicativo sobre la nota final de presentación (ej. 1.05 para bonificación de +5%):
+                    </p>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 pt-1">
+                    <div className="flex gap-1">
+                      {[1, 1.03, 1.05, 1.1].map((presetMult) => (
+                        <button
+                          key={presetMult}
+                          type="button"
+                          onClick={() =>
+                            handleUpdateGlobalModifiers(
+                              presetMult,
+                              formula.finalGradeBonusPoints ?? 0
+                            )
+                          }
+                          className={`px-1.5 py-1 rounded text-[10px] font-mono font-bold border transition-colors ${
+                            Math.abs(
+                              (formula.finalGradeMultiplier ?? 1) - presetMult
+                            ) < 0.001
+                              ? "bg-amber-500/20 border-amber-500/60 text-amber-300"
+                              : "bg-zinc-950 border-zinc-800 text-zinc-400 hover:text-zinc-200"
+                          }`}
+                        >
+                          {presetMult.toFixed(2)}x
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[11px] font-mono text-amber-400 font-bold">
+                        ×
+                      </span>
+                      <input
+                        type="number"
+                        min={0.5}
+                        max={2.0}
+                        step={0.01}
+                        value={formula.finalGradeMultiplier ?? 1}
+                        onChange={(e) => {
+                          const val = Number(e.target.value);
+                          if (!isNaN(val) && val > 0) {
+                            handleUpdateGlobalModifiers(
+                              val,
+                              formula.finalGradeBonusPoints ?? 0
+                            );
+                          }
+                        }}
+                        className="w-16 h-7 text-center font-mono text-xs font-bold rounded bg-zinc-950 border border-zinc-700 text-amber-300 focus:border-amber-500 outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="space-y-3">
             {blocks.map((block) => {
               const bResult = solveResult.blocks.find(
                 (b) => b.blockId === block.id
               );
+              const effWeight = bResult?.weightInFinal ?? block.weightInFinal;
               const droppedIds = getDroppedEvalIds(
                 block.evaluations,
                 bResult?.droppedScores
@@ -493,11 +870,7 @@ export function CourseSolverCard({
                       </span>
                       <span className="text-[10px] font-mono text-zinc-500">
                         ({block.code} •{" "}
-                        {Math.round(
-                          block.weightInFinal *
-                            (block.weightInFinal <= 1 ? 100 : 1)
-                        )}
-                        %)
+                        {Math.round(effWeight * (effWeight <= 1 ? 100 : 1))}%)
                       </span>
                     </div>
 
@@ -542,7 +915,7 @@ export function CourseSolverCard({
                             <input
                               type="number"
                               min={0}
-                              max={100}
+                              max={120}
                               step={1}
                               value={
                                 ev.score !== null && ev.score !== undefined
@@ -561,7 +934,7 @@ export function CourseSolverCard({
                                       sigla,
                                       block.id,
                                       ev.id,
-                                      Math.min(100, Math.max(0, num))
+                                      Math.min(120, Math.max(0, num))
                                     );
                                   }
                                 }
@@ -577,7 +950,7 @@ export function CourseSolverCard({
                                 isDropped
                                   ? "Esta nota es la más baja y ha sido descartada por la regla del ramo"
                                   : isUnknown
-                                  ? "Incógnita (x_i). Ingresa nota tentativa (0 a 100)"
+                                  ? "Incógnita (x_i). Ingresa nota tentativa (0 a 100, o hasta 120 si incluye bonus)"
                                   : `Nota registrada: ${ev.score}`
                               }
                             />

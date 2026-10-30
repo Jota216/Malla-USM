@@ -2,6 +2,7 @@ import * as React from "react";
 import {
   Course,
   CourseFinalFormula,
+  PiecewiseAlphaRule,
   SubFormulaBlock,
   SubFormulaType,
 } from "@/shared/types/academic";
@@ -79,6 +80,13 @@ export function FormulaEditorModal({
   const [blocks, setBlocks] = React.useState<SubFormulaBlock[]>([]);
   const [passingGrade, setPassingGrade] = React.useState<number>(55);
   const [applyPenaltyRule, setApplyPenaltyRule] = React.useState<boolean>(true);
+  const [piecewiseAlpha, setPiecewiseAlpha] = React.useState<
+    PiecewiseAlphaRule | undefined
+  >(undefined);
+  const [finalGradeMultiplier, setFinalGradeMultiplier] =
+    React.useState<number>(1);
+  const [finalGradeBonusPoints, setFinalGradeBonusPoints] =
+    React.useState<number>(0);
   const [source, setSource] = React.useState<CourseFinalFormula["source"]>("custom");
   const [sourceLabel, setSourceLabel] = React.useState<string>("");
   const [requirementsNote, setRequirementsNote] = React.useState<string>("");
@@ -93,6 +101,13 @@ export function FormulaEditorModal({
     setBlocks(clonedBlocks);
     setPassingGrade(currentFormula.passingGrade ?? 55);
     setApplyPenaltyRule(currentFormula.applyPenaltyRule ?? true);
+    setPiecewiseAlpha(
+      currentFormula.piecewiseAlpha
+        ? { ...currentFormula.piecewiseAlpha }
+        : undefined
+    );
+    setFinalGradeMultiplier(currentFormula.finalGradeMultiplier ?? 1);
+    setFinalGradeBonusPoints(currentFormula.finalGradeBonusPoints ?? 0);
     setSource(currentFormula.source || "custom");
     setSourceLabel(currentFormula.sourceLabel || "Fórmula configurada");
     setRequirementsNote(currentFormula.syllabusRequirementsNote || "");
@@ -120,7 +135,7 @@ export function FormulaEditorModal({
 
   const handleLoadCourseDefault = () => {
     const inferred = inferCourseFormulaConfig(sigla, courseInfo);
-    // Preservar notas existentes en bloques con el mismo código si existen
+    // Preservar notas y bonificaciones existentes en bloques con el mismo código si existen
     const mergedBlocks = inferred.subFormulas.map((newB) => {
       const oldB = blocks.find(
         (b) => b.code.toUpperCase() === newB.code.toUpperCase() || b.id === newB.id
@@ -128,6 +143,8 @@ export function FormulaEditorModal({
       if (!oldB) return newB;
       return {
         ...newB,
+        bonusPoints: oldB.bonusPoints,
+        evalBonusPoints: oldB.evalBonusPoints,
         evaluations: newB.evaluations.map((ev, i) => ({
           ...ev,
           score:
@@ -141,6 +158,9 @@ export function FormulaEditorModal({
     setBlocks(mergedBlocks);
     setPassingGrade(inferred.passingGrade ?? 55);
     setApplyPenaltyRule(!!inferred.applyPenaltyRule);
+    setPiecewiseAlpha(
+      inferred.piecewiseAlpha ? { ...inferred.piecewiseAlpha } : undefined
+    );
     setSource(inferred.source || "siga_pdf");
     setSourceLabel(inferred.sourceLabel || "Programa Oficial SIGA");
     setRequirementsNote(inferred.syllabusRequirementsNote || "");
@@ -158,6 +178,8 @@ export function FormulaEditorModal({
       if (!oldB) return newB;
       return {
         ...newB,
+        bonusPoints: oldB.bonusPoints,
+        evalBonusPoints: oldB.evalBonusPoints,
         evaluations: newB.evaluations.map((ev, i) => ({
           ...ev,
           score:
@@ -171,6 +193,9 @@ export function FormulaEditorModal({
     setBlocks(mergedBlocks);
     setPassingGrade(built.passingGrade ?? 55);
     setApplyPenaltyRule(!!built.applyPenaltyRule);
+    setPiecewiseAlpha(
+      built.piecewiseAlpha ? { ...built.piecewiseAlpha } : undefined
+    );
     setSource("preset");
     setSourceLabel(preset.label);
     setRequirementsNote(built.syllabusRequirementsNote || preset.description);
@@ -220,6 +245,7 @@ export function FormulaEditorModal({
     };
 
     setBlocks((prev) => [...prev, newBlock]);
+    setPiecewiseAlpha(undefined);
     setSource("custom");
     setSourceLabel("Fórmula Personalizada (Aula USM)");
   };
@@ -227,6 +253,7 @@ export function FormulaEditorModal({
   const handleRemoveBlock = (index: number) => {
     if (blocks.length <= 1) return;
     setBlocks((prev) => prev.filter((_, i) => i !== index));
+    setPiecewiseAlpha(undefined);
     setSource("custom");
     setSourceLabel("Fórmula Personalizada (Aula USM)");
   };
@@ -266,11 +293,22 @@ export function FormulaEditorModal({
     });
 
     const newFormula: CourseFinalFormula = {
-      expression: buildFormulaExpression(normalizedBlocks),
+      expression: buildFormulaExpression(
+        normalizedBlocks,
+        piecewiseAlpha,
+        finalGradeMultiplier,
+        finalGradeBonusPoints
+      ),
       passingGrade: Math.max(1, Math.min(100, passingGrade || 55)),
       applyPenaltyRule:
         applyPenaltyRule &&
         normalizedBlocks.some((b) => b.minGradeRequired !== null),
+      piecewiseAlpha,
+      finalGradeMultiplier:
+        finalGradeMultiplier && finalGradeMultiplier > 0
+          ? finalGradeMultiplier
+          : 1,
+      finalGradeBonusPoints: finalGradeBonusPoints || 0,
       subFormulas: normalizedBlocks,
       source: source || "custom",
       sourceLabel: sourceLabel || "Fórmula Personalizada",
@@ -700,37 +738,79 @@ export function FormulaEditorModal({
             </div>
           </div>
 
-          {/* 3. Reglas Globales de Aprobación USM */}
-          <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-            <label className="flex items-center gap-2 cursor-pointer text-zinc-300">
-              <input
-                type="checkbox"
-                checked={applyPenaltyRule}
-                onChange={(e) => setApplyPenaltyRule(e.target.checked)}
-                className="rounded border-zinc-700 bg-zinc-900 text-amber-500 focus:ring-amber-500"
-              />
-              <span>
-                Aplicar penalización USM por mínimo de bloque{" "}
-                <span className="text-zinc-500">
-                  (si un bloque no cumple su mínimo, NF = promedio menor)
+          {/* 3. Reglas Globales de Aprobación USM y Modificadores */}
+          <div className="rounded-xl border border-zinc-800 bg-zinc-950/70 p-3.5 space-y-3 text-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <label className="flex items-center gap-2 cursor-pointer text-zinc-300">
+                <input
+                  type="checkbox"
+                  checked={applyPenaltyRule}
+                  onChange={(e) => setApplyPenaltyRule(e.target.checked)}
+                  className="rounded border-zinc-700 bg-zinc-900 text-amber-500 focus:ring-amber-500"
+                />
+                <span>
+                  Aplicar penalización USM por mínimo de bloque{" "}
+                  <span className="text-zinc-500">
+                    (si un bloque no cumple su mínimo, NF = promedio menor)
+                  </span>
                 </span>
-              </span>
-            </label>
+              </label>
 
-            <div className="flex items-center gap-2 shrink-0">
-              <span className="text-zinc-400">Nota aprobación (NF ≥):</span>
-              <input
-                type="number"
-                min={40}
-                max={100}
-                value={passingGrade}
-                onChange={(e) =>
-                  setPassingGrade(
-                    Math.max(40, Math.min(100, Number(e.target.value) || 55))
-                  )
-                }
-                className="w-14 h-7 text-center font-mono font-bold rounded bg-zinc-900 border border-zinc-700 text-amber-400"
-              />
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-zinc-400">Nota aprobación (NF ≥):</span>
+                <input
+                  type="number"
+                  min={40}
+                  max={100}
+                  value={passingGrade}
+                  onChange={(e) =>
+                    setPassingGrade(
+                      Math.max(40, Math.min(100, Number(e.target.value) || 55))
+                    )
+                  }
+                  className="w-14 h-7 text-center font-mono font-bold rounded bg-zinc-900 border border-zinc-700 text-amber-400"
+                />
+              </div>
+            </div>
+
+            {/* Multiplicador y Puntos extra a NF */}
+            <div className="pt-2 border-t border-zinc-800/80 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className="text-zinc-400">Multiplicador global:</span>
+                <input
+                  type="number"
+                  min={0.5}
+                  max={2.0}
+                  step={0.01}
+                  value={finalGradeMultiplier}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    if (!isNaN(val) && val > 0) {
+                      setFinalGradeMultiplier(val);
+                      setSource("custom");
+                    }
+                  }}
+                  className="w-16 h-7 text-center font-mono text-xs font-bold rounded bg-zinc-900 border border-zinc-700 text-amber-300"
+                />
+                <span className="text-[10px] text-zinc-500">(ej. 1.05 = +5%)</span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-zinc-400">Puntos extra NF:</span>
+                <input
+                  type="number"
+                  min={-20}
+                  max={50}
+                  step={0.5}
+                  value={finalGradeBonusPoints}
+                  onChange={(e) => {
+                    setFinalGradeBonusPoints(Number(e.target.value) || 0);
+                    setSource("custom");
+                  }}
+                  className="w-14 h-7 text-center font-mono text-xs font-bold rounded bg-zinc-900 border border-zinc-700 text-emerald-300"
+                />
+                <span className="text-[10px] text-zinc-500">pts (actividades externas)</span>
+              </div>
             </div>
           </div>
         </div>
@@ -739,7 +819,13 @@ export function FormulaEditorModal({
           <div className="text-xs font-mono text-zinc-400">
             Vista previa:{" "}
             <strong className="text-amber-400">
-              NF = {buildFormulaExpression(blocks)}
+              NF ={" "}
+              {buildFormulaExpression(
+                blocks,
+                piecewiseAlpha,
+                finalGradeMultiplier,
+                finalGradeBonusPoints
+              )}
             </strong>{" "}
             (≥ {passingGrade})
           </div>
