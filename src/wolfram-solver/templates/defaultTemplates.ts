@@ -111,7 +111,9 @@ export const createDefaultFormulaConfig = (): CourseFinalFormula => ({
 
 /**
  * Guarantees that an enrolled course has a valid CourseFinalFormula.
- * If config.formulaConfig exists, returns it; otherwise synthesizes one from groups or default.
+ * If config.formulaConfig exists, returns it (auto-upgrading stale department_heuristic
+ * configs if an official SIGA PDF formula is now available in the catalog);
+ * otherwise synthesizes one from groups or default.
  */
 export function ensureFormulaConfig(config: EnrolledCourseConfig): CourseFinalFormula {
   if (
@@ -119,6 +121,39 @@ export function ensureFormulaConfig(config: EnrolledCourseConfig): CourseFinalFo
     config.formulaConfig.subFormulas &&
     config.formulaConfig.subFormulas.length > 0
   ) {
+    if (config.formulaConfig.source === 'department_heuristic') {
+      const official = getOfficialSigaFormula(
+        config.sigla,
+        config.formulaConfig.syllabusPdfUrl
+      );
+      if (official && official.source === 'siga_pdf') {
+        const mergedBlocks = official.subFormulas.map((newB) => {
+          const oldB = config.formulaConfig!.subFormulas.find(
+            (b) =>
+              b.code.toUpperCase() === newB.code.toUpperCase() || b.id === newB.id
+          );
+          if (!oldB) return newB;
+          return {
+            ...newB,
+            bonusPoints: oldB.bonusPoints,
+            evalBonusPoints: oldB.evalBonusPoints,
+            evaluations: newB.evaluations.map((ev, i) => ({
+              ...ev,
+              score:
+                oldB.evaluations[i]?.score !== undefined
+                  ? oldB.evaluations[i].score
+                  : null,
+            })),
+          };
+        });
+        return {
+          ...official,
+          finalGradeMultiplier: config.formulaConfig.finalGradeMultiplier,
+          finalGradeBonusPoints: config.formulaConfig.finalGradeBonusPoints,
+          subFormulas: mergedBlocks,
+        };
+      }
+    }
     return config.formulaConfig;
   }
 

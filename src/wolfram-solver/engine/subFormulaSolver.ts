@@ -1,6 +1,7 @@
 import {
   SubFormulaBlock,
   CourseFinalFormula,
+  PiecewiseAlphaRule,
   SubFormulaCourseSolveResult,
   SubFormulaBlockSolveResult,
   SubFormulaSolverStatus,
@@ -12,6 +13,26 @@ import {
 export function roundTo(val: number, decimals: number = 1): number {
   const factor = Math.pow(10, decimals);
   return Math.round(val * factor) / factor;
+}
+
+/**
+ * Computes the dynamic weight α(PC) for USM Informática piecewise formulas
+ * (e.g., INF-245, INF-256):
+ *   α = 0          if PC <= minThreshold (30)
+ *   α = maxAlpha   if PC >= maxThreshold (60)
+ *   α = maxAlpha * (PC - minThreshold) / (maxThreshold - minThreshold)  otherwise
+ */
+export function computePiecewiseAlpha(
+  baseScore: number,
+  rule: PiecewiseAlphaRule
+): number {
+  const minT = rule.minThreshold ?? 30;
+  const maxT = rule.maxThreshold ?? 60;
+  const maxA = rule.maxAlpha ?? 0.3;
+  if (baseScore <= minT) return 0;
+  if (baseScore >= maxT) return maxA;
+  if (maxT <= minT) return maxA;
+  return maxA * ((baseScore - minT) / (maxT - minT));
 }
 
 /**
@@ -29,10 +50,45 @@ export function normalizeWeights(weights: number[]): number[] {
 
 export interface BlockEvaluationBreakdown {
   average: number | null;
+  rawAverage: number | null;
+  effectiveBonus: number;
   droppedScores: number[];
   usedScores: number[];
   knownCount: number;
   unknownCount: number;
+}
+
+/**
+ * Computes the effective bonus points added to a block's average (0-100 scale):
+ * - bonusPoints: direct points added to the block average (e.g. +3 pts to PC).
+ * - evalBonusPoints: points added to a single evaluation/certamen in the block,
+ *   which contributes (evalBonusPoints / usedEvaluationsCount) to the block average.
+ */
+export function computeEffectiveBlockBonus(block: SubFormulaBlock): number {
+  const directBonus = Number(block.bonusPoints) || 0;
+  const evalBonus = Number(block.evalBonusPoints) || 0;
+  const totalCount = Math.max(
+    1,
+    block.count || (block.evaluations ? block.evaluations.length : 1)
+  );
+  const dropWorst =
+    block.type === 'drop_worst' ? Math.max(0, block.dropWorstCount || 0) : 0;
+  const usedCount = Math.max(1, totalCount - dropWorst);
+  return directBonus + evalBonus / usedCount;
+}
+
+function applyBlockBonus(
+  rawAverage: number | null,
+  effectiveBonus: number,
+  treatEmptyAsZero: boolean
+): number | null {
+  if (rawAverage === null) {
+    if (treatEmptyAsZero && effectiveBonus !== 0) {
+      return Math.min(100, Math.max(0, effectiveBonus));
+    }
+    return null;
+  }
+  return Math.min(100, Math.max(0, rawAverage + effectiveBonus));
 }
 
 /**
@@ -45,6 +101,7 @@ export function computeBlockDetails(
   const evals = block.evaluations || [];
   const totalCount = block.count || evals.length;
   const dropWorst = Math.max(0, block.dropWorstCount || 0);
+  const effectiveBonus = computeEffectiveBlockBonus(block);
 
   const knownScores: number[] = [];
   let unknownCount = 0;
@@ -65,7 +122,9 @@ export function computeBlockDetails(
   // If no known scores and empty values are not treated as zero, average is null
   if (!treatEmptyAsZero && knownScores.length === 0) {
     return {
-      average: null,
+      average: effectiveBonus > 0 ? Math.min(100, effectiveBonus) : null,
+      rawAverage: null,
+      effectiveBonus,
       droppedScores: [],
       usedScores: [],
       knownCount: 0,
@@ -76,11 +135,22 @@ export function computeBlockDetails(
   // 1. Simple Average
   if (block.type === 'simple_average') {
     if (knownScores.length === 0) {
-      return { average: null, droppedScores: [], usedScores: [], knownCount, unknownCount };
+      return {
+        average: applyBlockBonus(null, effectiveBonus, treatEmptyAsZero),
+        rawAverage: null,
+        effectiveBonus,
+        droppedScores: [],
+        usedScores: [],
+        knownCount,
+        unknownCount,
+      };
     }
     const sum = knownScores.reduce((a, b) => a + b, 0);
+    const rawAverage = sum / knownScores.length;
     return {
-      average: sum / knownScores.length,
+      average: applyBlockBonus(rawAverage, effectiveBonus, treatEmptyAsZero),
+      rawAverage,
+      effectiveBonus,
       droppedScores: [],
       usedScores: [...knownScores],
       knownCount,
@@ -91,7 +161,15 @@ export function computeBlockDetails(
   // 2. Drop Worst K scores
   if (block.type === 'drop_worst') {
     if (knownScores.length === 0) {
-      return { average: null, droppedScores: [], usedScores: [], knownCount, unknownCount };
+      return {
+        average: applyBlockBonus(null, effectiveBonus, treatEmptyAsZero),
+        rawAverage: null,
+        effectiveBonus,
+        droppedScores: [],
+        usedScores: [],
+        knownCount,
+        unknownCount,
+      };
     }
 
     const sorted = [...knownScores].sort((a, b) => a - b);
@@ -102,8 +180,11 @@ export function computeBlockDetails(
       const dropped = sorted.slice(0, dropsAllowed);
       const used = sorted.slice(dropsAllowed);
       const sum = used.reduce((a, b) => a + b, 0);
+      const rawAverage = used.length > 0 ? sum / used.length : null;
       return {
-        average: used.length > 0 ? sum / used.length : null,
+        average: applyBlockBonus(rawAverage, effectiveBonus, treatEmptyAsZero),
+        rawAverage,
+        effectiveBonus,
         droppedScores: dropped,
         usedScores: used,
         knownCount,
@@ -118,8 +199,11 @@ export function computeBlockDetails(
         const dropped = sorted.slice(0, dropsAllowed);
         const used = sorted.slice(dropsAllowed);
         const sum = used.reduce((a, b) => a + b, 0);
+        const rawAverage = used.length > 0 ? sum / used.length : null;
         return {
-          average: used.length > 0 ? sum / used.length : null,
+          average: applyBlockBonus(rawAverage, effectiveBonus, treatEmptyAsZero),
+          rawAverage,
+          effectiveBonus,
           droppedScores: dropped,
           usedScores: used,
           knownCount,
@@ -128,8 +212,11 @@ export function computeBlockDetails(
       } else {
         // Not enough evaluations taken yet to drop worst: average all known scores
         const sum = sorted.reduce((a, b) => a + b, 0);
+        const rawAverage = sum / sorted.length;
         return {
-          average: sum / sorted.length,
+          average: applyBlockBonus(rawAverage, effectiveBonus, treatEmptyAsZero),
+          rawAverage,
+          effectiveBonus,
           droppedScores: [],
           usedScores: sorted,
           knownCount,
@@ -160,11 +247,22 @@ export function computeBlockDetails(
     }
 
     if (weightSum <= 0) {
-      return { average: null, droppedScores: [], usedScores: [], knownCount, unknownCount };
+      return {
+        average: applyBlockBonus(null, effectiveBonus, treatEmptyAsZero),
+        rawAverage: null,
+        effectiveBonus,
+        droppedScores: [],
+        usedScores: [],
+        knownCount,
+        unknownCount,
+      };
     }
 
+    const rawAverage = pointSum / weightSum;
     return {
-      average: pointSum / weightSum,
+      average: applyBlockBonus(rawAverage, effectiveBonus, treatEmptyAsZero),
+      rawAverage,
+      effectiveBonus,
       droppedScores: [],
       usedScores: used,
       knownCount,
@@ -172,7 +270,15 @@ export function computeBlockDetails(
     };
   }
 
-  return { average: null, droppedScores: [], usedScores: [], knownCount, unknownCount };
+  return {
+    average: null,
+    rawAverage: null,
+    effectiveBonus,
+    droppedScores: [],
+    usedScores: [],
+    knownCount,
+    unknownCount,
+  };
 }
 
 /**
@@ -201,6 +307,7 @@ export function computeBlockAverageWithScore(
   const evals = block.evaluations || [];
   const totalCount = block.count || evals.length;
   const dropWorst = Math.max(0, block.dropWorstCount || 0);
+  const effectiveBonus = computeEffectiveBlockBonus(block);
 
   const scores: number[] = [];
   for (const ev of evals) {
@@ -211,31 +318,29 @@ export function computeBlockAverageWithScore(
     }
   }
 
-  if (scores.length === 0) return 0;
+  if (scores.length === 0) return Math.min(100, Math.max(0, effectiveBonus));
+
+  let rawAvg = 0;
 
   if (block.type === 'simple_average') {
     const sum = scores.reduce((a, b) => a + b, 0);
-    return sum / scores.length;
-  }
-
-  if (block.type === 'drop_worst') {
+    rawAvg = sum / scores.length;
+  } else if (block.type === 'drop_worst') {
     const sorted = [...scores].sort((a, b) => a - b);
     const dropsAllowed = Math.min(dropWorst, Math.max(0, totalCount - 1));
     const used = sorted.slice(dropsAllowed);
     const sum = used.reduce((a, b) => a + b, 0);
-    return used.length > 0 ? sum / used.length : 0;
-  }
-
-  if (block.type === 'weighted') {
+    rawAvg = used.length > 0 ? sum / used.length : 0;
+  } else if (block.type === 'weighted') {
     const weights = normalizeWeights(evals.map((e) => e.weight));
     let sum = 0;
     for (let i = 0; i < scores.length; i++) {
       sum += weights[i] * scores[i];
     }
-    return sum;
+    rawAvg = sum;
   }
 
-  return 0;
+  return Math.min(100, Math.max(0, rawAvg + effectiveBonus));
 }
 
 /**
@@ -254,6 +359,8 @@ export function solveBlockRequiredGrade(
   const unknownCount = evals.filter(
     (e) => e.score === null || e.score === undefined || isNaN(e.score)
   ).length;
+  const effectiveBonus = computeEffectiveBlockBonus(block);
+  const adjustedTargetMin = Math.max(0, targetMin - effectiveBonus);
 
   if (unknownCount === 0) {
     const current = computeBlockAverage(block, true) ?? 0;
@@ -266,17 +373,17 @@ export function solveBlockRequiredGrade(
     return 0;
   }
 
-  // Analytical clearance for simple_average: (sum(known) + U*X) / N >= targetMin
+  // Analytical clearance for simple_average: (sum(known) + U*X) / N >= adjustedTargetMin
   if (block.type === 'simple_average') {
     const N = evals.length;
     const knownSum = evals
       .filter((e) => e.score !== null && e.score !== undefined && !isNaN(e.score))
       .reduce((acc, e) => acc + Number(e.score), 0);
-    const needed = (N * targetMin - knownSum) / unknownCount;
+    const needed = (N * adjustedTargetMin - knownSum) / unknownCount;
     return roundTo(needed, 2);
   }
 
-  // Analytical clearance for weighted: (knownPoints + sum(U_w)*X) / totalW >= targetMin
+  // Analytical clearance for weighted: (knownPoints + sum(U_w)*X) / totalW >= adjustedTargetMin
   if (block.type === 'weighted') {
     const normalizedEvalWeights = normalizeWeights(evals.map((e) => e.weight));
     let knownPoints = 0;
@@ -291,7 +398,7 @@ export function solveBlockRequiredGrade(
     });
 
     if (unknownWeight <= 0) return null;
-    const needed = (targetMin - knownPoints) / unknownWeight;
+    const needed = (adjustedTargetMin - knownPoints) / unknownWeight;
     return roundTo(needed, 2);
   }
 
@@ -323,25 +430,49 @@ export function solveGlobalFormulaUniformGrade(
 ): number | null {
   const blocks = config.subFormulas || [];
   const normalizedWeights = normalizeWeights(blocks.map((b) => b.weightInFinal));
+  const pwRule = config.piecewiseAlpha;
+  const multiplier =
+    config.finalGradeMultiplier && config.finalGradeMultiplier > 0
+      ? config.finalGradeMultiplier
+      : 1;
+  const globalBonus = Number(config.finalGradeBonusPoints) || 0;
+
+  const baseIdx = pwRule
+    ? blocks.findIndex(
+        (b) => b.code.toUpperCase() === pwRule.baseBlockCode.toUpperCase()
+      )
+    : -1;
+  const targetIdx = pwRule
+    ? blocks.findIndex(
+        (b) => b.code.toUpperCase() === pwRule.targetBlockCode.toUpperCase()
+      )
+    : -1;
 
   // Count total unknowns across entire course
   let totalUnknowns = 0;
   for (const block of blocks) {
     const u = (block.evaluations || []).filter(
-      (e) => e.score === null || e.score === undefined || isNaN(e.score)
+      (e) => e.score === null || e.score !== null && isNaN(e.score) || e.score === undefined
     ).length;
     totalUnknowns += u;
   }
 
   // Function to evaluate global formula with uniform score X
   const evalFormulaWithX = (X: number): number => {
-    let nf = 0;
-    for (let i = 0; i < blocks.length; i++) {
-      const w = normalizedWeights[i];
-      const avg = computeBlockAverageWithScore(blocks[i], X);
-      nf += w * avg;
+    let baseNf = 0;
+    if (pwRule && baseIdx !== -1 && targetIdx !== -1) {
+      const pc = computeBlockAverageWithScore(blocks[baseIdx], X);
+      const pt = computeBlockAverageWithScore(blocks[targetIdx], X);
+      const alpha = computePiecewiseAlpha(pc, pwRule);
+      baseNf = pc * (1 - alpha) + alpha * pt;
+    } else {
+      for (let i = 0; i < blocks.length; i++) {
+        const w = normalizedWeights[i];
+        const avg = computeBlockAverageWithScore(blocks[i], X);
+        baseNf += w * avg;
+      }
     }
-    return nf;
+    return Math.min(100, Math.max(0, baseNf * multiplier + globalBonus));
   };
 
   if (totalUnknowns === 0) {
@@ -375,16 +506,16 @@ export function solveGlobalFormulaUniformGrade(
  *
  * Implements:
  * 1. Current average of each sub-formula block (drop worst, simple, weighted).
- * 2. Minimum threshold satisfaction per block (e.g. >= 50).
- * 3. USM Penalty Condition:
+ * 2. Minimum threshold satisfaction per block (e.g. >= 50 or >= 60).
+ * 3. Piecewise dynamic weight α(PC) (e.g. INF-245, INF-256).
+ * 4. USM Penalty Condition:
  *    IF all blocks with minGrade >= minGrade THEN NF = formula ELSE NF = min(block averages).
- * 4. Algebraic clearance:
+ * 5. Algebraic clearance:
  *    - X_block: uniform grade needed in empty evaluations of block b to reach M_b.
  *    - X_global: uniform grade needed across all empty evaluations to reach NF >= 55.
  *    - X_effective: max(X_global, max_b(X_block)).
- * 5. Binding condition detection ('GLOBAL' | 'BLOCK_MIN' | 'NONE').
- * 6. Academic status ('APPROVED' | 'ON_TRACK' | 'IN_DANGER' | 'REQUIRES_PERFECT' | 'FAILED').
- * 7. Concise and actionable diagnostic message.
+ * 6. Binding condition detection ('GLOBAL' | 'BLOCK_MIN' | 'NONE').
+ * 7. Academic status ('APPROVED' | 'ON_TRACK' | 'IN_DANGER' | 'REQUIRES_PERFECT' | 'FAILED').
  */
 export function solveSubFormulaCourse(
   config: CourseFinalFormula,
@@ -393,11 +524,16 @@ export function solveSubFormulaCourse(
   const passingGrade = passingGradeOverride ?? config.passingGrade ?? 55;
   const blocks = config.subFormulas || [];
   const normalizedBlockWeights = normalizeWeights(blocks.map((b) => b.weightInFinal));
+  const pwRule = config.piecewiseAlpha;
+  const multiplier =
+    config.finalGradeMultiplier && config.finalGradeMultiplier > 0
+      ? config.finalGradeMultiplier
+      : 1;
+  const globalBonus = Number(config.finalGradeBonusPoints) || 0;
 
   // 1. Solve each block independently
   const blockResults: SubFormulaBlockSolveResult[] = [];
   let totalUnknowns = 0;
-  let totalKnowns = 0;
 
   for (let i = 0; i < blocks.length; i++) {
     const block = blocks[i];
@@ -408,11 +544,11 @@ export function solveSubFormulaCourse(
     const minGrade = block.minGradeRequired ?? null;
     const knownCount = breakdown.knownCount;
     const unknownCount = breakdown.unknownCount;
-    totalKnowns += knownCount;
     totalUnknowns += unknownCount;
 
-    // Check if current known average meets min grade
     const currentAvg = breakdown.average !== null ? roundTo(breakdown.average, 2) : null;
+    const rawAvg = breakdown.rawAverage !== null ? roundTo(breakdown.rawAverage, 2) : null;
+    const effectiveBonus = roundTo(breakdown.effectiveBonus, 2);
     const projectedWithZero = roundTo(zeroFilledBreakdown.average ?? 0, 2);
 
     let requiredForBlockMin: number | null = null;
@@ -420,10 +556,6 @@ export function solveSubFormulaCourse(
       requiredForBlockMin = solveBlockRequiredGrade(block, minGrade);
     }
 
-    // Meets min grade if:
-    // - has no min requirement, OR
-    // - unknownCount == 0 and currentAvg >= minGrade, OR
-    // - unknownCount > 0 and currentAvg is currently >= minGrade (on track)
     const meetsMin =
       minGrade === null
         ? true
@@ -439,48 +571,119 @@ export function solveSubFormulaCourse(
       weightInFinal: roundTo(weightInFinal, 4),
       minGradeRequired: minGrade,
       currentAverage: currentAvg,
+      rawAverage: rawAvg,
+      effectiveBonusPoints: effectiveBonus,
       projectedAverageWithZero: projectedWithZero,
       requiredForBlockMin,
       meetsMinGrade: meetsMin,
-      isMinGradeCritical: false, // will flag if it binds over global
+      isMinGradeCritical: false,
       knownCount,
       unknownCount,
       droppedScores: breakdown.droppedScores,
     });
   }
 
-  // 2. Compute current final grade
-  // Using current known averages (normalized across blocks with known grades):
-  let knownWeightedSum = 0;
-  let knownWeightSum = 0;
+  // 2. Compute current final grade (supporting piecewise α(PC), multiplier & bonus points)
+  let baseFormulaFinalGrade = 0;
+  let hasAnyEvaluatedBlock = false;
+  let dynamicAlpha: number | null = null;
   const currentBlockAveragesForPenalty: number[] = [];
 
   for (let i = 0; i < blocks.length; i++) {
     const bResult = blockResults[i];
-    const w = normalizedBlockWeights[i];
-    if (bResult.currentAverage !== null) {
-      knownWeightedSum += w * bResult.currentAverage;
-      knownWeightSum += w;
-      currentBlockAveragesForPenalty.push(bResult.currentAverage);
+    currentBlockAveragesForPenalty.push(bResult.currentAverage ?? 0);
+  }
+
+  const baseIdx = pwRule
+    ? blocks.findIndex(
+        (b) => b.code.toUpperCase() === pwRule.baseBlockCode.toUpperCase()
+      )
+    : -1;
+  const targetIdx = pwRule
+    ? blocks.findIndex(
+        (b) => b.code.toUpperCase() === pwRule.targetBlockCode.toUpperCase()
+      )
+    : -1;
+
+  if (pwRule && baseIdx !== -1 && targetIdx !== -1) {
+    const baseAvg = blockResults[baseIdx].currentAverage;
+    const targetAvg = blockResults[targetIdx].currentAverage;
+
+    if (baseAvg !== null) {
+      hasAnyEvaluatedBlock = true;
+      const alpha = computePiecewiseAlpha(baseAvg, pwRule);
+      dynamicAlpha = roundTo(alpha, 3);
+      blockResults[baseIdx].weightInFinal = roundTo(1 - alpha, 4);
+      blockResults[targetIdx].weightInFinal = roundTo(alpha, 4);
+
+      if (targetAvg !== null) {
+        baseFormulaFinalGrade = baseAvg * (1 - alpha) + alpha * targetAvg;
+      } else {
+        baseFormulaFinalGrade = baseAvg;
+      }
     } else {
-      currentBlockAveragesForPenalty.push(0);
+      dynamicAlpha = roundTo(pwRule.maxAlpha ?? 0.3, 3);
+      if (targetAvg !== null) {
+        hasAnyEvaluatedBlock = true;
+        baseFormulaFinalGrade = targetAvg;
+      }
     }
+  } else {
+    let knownWeightedSum = 0;
+    let knownWeightSum = 0;
+
+    for (let i = 0; i < blocks.length; i++) {
+      const bResult = blockResults[i];
+      const w = normalizedBlockWeights[i];
+      if (bResult.currentAverage !== null) {
+        knownWeightedSum += w * bResult.currentAverage;
+        knownWeightSum += w;
+        hasAnyEvaluatedBlock = true;
+      }
+    }
+
+    baseFormulaFinalGrade =
+      knownWeightSum > 0 ? knownWeightedSum / knownWeightSum : 0;
   }
 
   const formulaFinalGrade =
-    knownWeightSum > 0 ? roundTo(knownWeightedSum / knownWeightSum, 2) : 0;
+    hasAnyEvaluatedBlock || globalBonus > 0
+      ? roundTo(
+          Math.min(100, Math.max(0, baseFormulaFinalGrade * multiplier + globalBonus)),
+          2
+        )
+      : 0;
+
+  // Compute guaranteed minimum possible grade (with 0 in all remaining unknowns)
+  let baseMinPossiblePoints = 0;
+  if (pwRule && baseIdx !== -1 && targetIdx !== -1) {
+    const pc0 = blockResults[baseIdx].projectedAverageWithZero;
+    const pt0 = blockResults[targetIdx].projectedAverageWithZero;
+    const alpha0 = computePiecewiseAlpha(pc0, pwRule);
+    baseMinPossiblePoints = pc0 * (1 - alpha0) + alpha0 * pt0;
+  } else {
+    baseMinPossiblePoints = blockResults.reduce(
+      (acc, b, idx) => acc + normalizedBlockWeights[idx] * b.projectedAverageWithZero,
+      0
+    );
+  }
+  const minPossiblePoints = roundTo(
+    Math.min(100, Math.max(0, baseMinPossiblePoints * multiplier + globalBonus)),
+    2
+  );
 
   // 3. Evaluate USM Penalty Rule
-  // If applyPenaltyRule is true:
-  // IF all blocks with minGrade >= minGrade THEN NF = formula ELSE NF = min(promedios_de_bloques)
-  const penaltyRuleApplies = !!config.applyPenaltyRule && blocks.some((b) => b.minGradeRequired !== null);
+  const penaltyRuleApplies =
+    !!config.applyPenaltyRule && blocks.some((b) => b.minGradeRequired !== null);
 
   let isPenaltyTriggered = false;
   let penaltyGrade: number | null = null;
 
   if (penaltyRuleApplies) {
     const failingBlock = blockResults.find(
-      (b) => b.minGradeRequired !== null && (b.currentAverage === null || b.currentAverage < b.minGradeRequired)
+      (b) =>
+        b.minGradeRequired !== null &&
+        (b.currentAverage === null || b.currentAverage < b.minGradeRequired)
     );
     if (failingBlock) {
       isPenaltyTriggered = true;
@@ -489,9 +692,8 @@ export function solveSubFormulaCourse(
     }
   }
 
-  const currentFinalGrade = isPenaltyTriggered && penaltyGrade !== null
-    ? penaltyGrade
-    : formulaFinalGrade;
+  const currentFinalGrade =
+    isPenaltyTriggered && penaltyGrade !== null ? penaltyGrade : formulaFinalGrade;
 
   // 4. Algebraic Clearance: Global grade vs Block minimums
   const requiredGlobalGrade = solveGlobalFormulaUniformGrade(config, passingGrade);
@@ -525,7 +727,6 @@ export function solveSubFormulaCourse(
   let diagnosticMessage = '';
 
   if (totalUnknowns === 0) {
-    // All evaluations have been taken
     const allMinsMet = blockResults.every((b) => {
       if (b.minGradeRequired === null) return true;
       return (b.currentAverage ?? 0) >= b.minGradeRequired;
@@ -540,20 +741,14 @@ export function solveSubFormulaCourse(
         const failed = blockResults.find(
           (b) => b.minGradeRequired !== null && (b.currentAverage ?? 0) < b.minGradeRequired
         );
-        diagnosticMessage = `Reprobado por regla de penalización USM: ${failed?.blockName} (${failed?.blockCode}) promedió ${failed?.currentAverage ?? 0} (mínimo exigido: ${failed?.minGradeRequired}). Nota final castigada a ${currentFinalGrade}.`;
+        diagnosticMessage = `Reprobado por requisito de aprobación: ${failed?.blockName} (${failed?.blockCode}) promedió ${failed?.currentAverage ?? 0} (mínimo exigido: ${failed?.minGradeRequired}). Nota final: ${currentFinalGrade}.`;
       } else {
         diagnosticMessage = `Reprobado. Nota final: ${currentFinalGrade} (mínimo de aprobación: ${passingGrade}).`;
       }
     }
   } else {
-    // Unknown evaluations remain
     const req = effectiveRequiredGrade ?? 0;
 
-    // Check if mathematically approved with 0 in remaining
-    const minPossiblePoints = blockResults.reduce(
-      (acc, b, idx) => acc + normalizedBlockWeights[idx] * b.projectedAverageWithZero,
-      0
-    );
     const allMinsMetWithZero = blockResults.every((b) => {
       if (b.minGradeRequired === null) return true;
       return (b.requiredForBlockMin ?? 0) <= 0;
@@ -563,12 +758,12 @@ export function solveSubFormulaCourse(
       status = 'APPROVED';
       bindingCondition = 'NONE';
       effectiveRequiredGrade = 0;
-      diagnosticMessage = `¡Matemáticamente Aprobado! Tienes ${currentFinalGrade} asegurado. Aún obteniendo 0 en lo restante apruebas el ramo.`;
+      diagnosticMessage = `¡Matemáticamente Aprobado! Tienes ${roundTo(minPossiblePoints, 1)} asegurado. Aún obteniendo 0 en lo restante apruebas el ramo.`;
     } else if (req > 100) {
       status = 'REQUIRES_PERFECT';
       if (bindingCondition === 'BLOCK_MIN') {
         const minReq = blockResults.find((b) => b.blockCode === bindingBlockCode)?.minGradeRequired;
-        diagnosticMessage = `Exigencia extrema: ${bindingBlockName} (${bindingBlockCode}) requiere ${req} (> 100) para cumplir el mínimo de ${minReq}. Aplica regla de penalización USM si no se recupera.`;
+        diagnosticMessage = `Exigencia extrema: ${bindingBlockName} (${bindingBlockCode}) requiere ${req} (> 100) para cumplir el mínimo de ${minReq}.`;
       } else {
         diagnosticMessage = `Exigencia extrema: Se requiere promediar ${req} (> 100) en evaluaciones restantes para alcanzar la nota ${passingGrade}.`;
       }
@@ -576,7 +771,7 @@ export function solveSubFormulaCourse(
       status = 'IN_DANGER';
       if (bindingCondition === 'BLOCK_MIN') {
         const minReq = blockResults.find((b) => b.blockCode === bindingBlockCode)?.minGradeRequired;
-        diagnosticMessage = `¡En Peligro! Restricción crítica en ${bindingBlockName} (${bindingBlockCode}): necesitas promediar al menos ${req} para cumplir el mínimo de ${minReq} y evitar la penalización USM.`;
+        diagnosticMessage = `¡En Peligro! Restricción crítica en ${bindingBlockName} (${bindingBlockCode}): necesitas promediar al menos ${req} para cumplir el mínimo de ${minReq}.`;
       } else {
         diagnosticMessage = `¡En Peligro! Necesitas promediar ${req} en las evaluaciones restantes para alcanzar la nota de aprobación ${passingGrade}.`;
       }
@@ -595,6 +790,10 @@ export function solveSubFormulaCourse(
     status,
     currentFinalGrade,
     formulaFinalGrade,
+    minPossibleGrade: minPossiblePoints,
+    dynamicAlpha,
+    finalGradeMultiplier: multiplier,
+    finalGradeBonusPoints: globalBonus,
     penaltyRuleApplies,
     isPenaltyTriggered,
     penaltyGrade,
@@ -629,7 +828,6 @@ export function simulateSubFormulaGrades(
 
   return solveSubFormulaCourse(clonedConfig);
 }
-
 
 export type GlobalExamModality = 'mat_70_30' | 'fis_60_40' | 'replace_worst';
 

@@ -181,6 +181,8 @@ export interface SubFormulaBlock {
   dropWorstCount: number;
   minGradeRequired: number | null;
   weightInFinal: number; // e.g. 0.10, 0.45 or 10, 45
+  bonusPoints?: number; // Puntos extra sumados directamente al promedio de este bloque (escala 0-100)
+  evalBonusPoints?: number; // Puntos extra de actividades externas para un certamen/evaluación del bloque (suma +pts/N al promedio)
   evaluations: SubFormulaEvaluation[];
 }
 
@@ -190,6 +192,8 @@ export interface CourseFinalFormula {
   applyPenaltyRule: boolean; // IF all blocks with minGrade >= minGrade THEN NF = formula ELSE NF = min(block averages)
   subFormulas: SubFormulaBlock[];
   piecewiseAlpha?: PiecewiseAlphaRule;
+  finalGradeMultiplier?: number; // Multiplicador sobre la nota final (ej. 1.05 para +5%, default 1.0)
+  finalGradeBonusPoints?: number; // Puntos extra sumados directamente a la Nota Final por actividades externas
   source?: FormulaSourceType;
   sourceLabel?: string;
   syllabusRequirementsNote?: string;
@@ -220,6 +224,8 @@ export interface SubFormulaBlockSolveResult {
   weightInFinal: number; // normalized (0 to 1)
   minGradeRequired: number | null;
   currentAverage: number | null;
+  rawAverage?: number | null;
+  effectiveBonusPoints?: number;
   projectedAverageWithZero: number;
   requiredForBlockMin: number | null;
   meetsMinGrade: boolean;
@@ -234,7 +240,10 @@ export interface SubFormulaCourseSolveResult {
   status: SubFormulaSolverStatus;
   currentFinalGrade: number;
   formulaFinalGrade: number;
+  minPossibleGrade?: number;
   dynamicAlpha?: number | null;
+  finalGradeMultiplier?: number;
+  finalGradeBonusPoints?: number;
   penaltyRuleApplies: boolean;
   isPenaltyTriggered: boolean;
   penaltyGrade: number | null;
