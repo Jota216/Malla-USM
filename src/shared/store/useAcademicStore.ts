@@ -12,7 +12,6 @@ import {
 } from '@/shared/types/academic';
 import ici2014Data from '@/curricula/careers/ici-2014.json';
 import {
-  createDefaultCourseConfig,
   createSmartCourseConfig,
   DEFAULT_GRADUATION_MILESTONES,
   createInf292ExampleScenario,
