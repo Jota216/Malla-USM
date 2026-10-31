@@ -427,16 +427,22 @@ export function SemesterScheduleView() {
       }
     }
 
+    // Check if Saturday is used by existing blocks or could be used by any parallel
+    const saturdayPossible = enrolledSiglas.some((sigla) =>
+      (parallelsByCourse[sigla] || []).some((p) =>
+        p.horario?.some((b) => b.dia === 5)
+      )
+    );
+
     const conflictList: Array<{
       dia: number;
       pair: string;
       entries: ScheduledCellEntry[];
     }> = [];
 
+    // Conflict list for enrolled courses (stable, prevents layout shift during hover preview)
     for (const [key, entries] of Object.entries(map)) {
-      const targetEntries = activeComboPreview
-        ? entries
-        : entries.filter((e) => !e.isPreview);
+      const targetEntries = entries.filter((e) => !e.isPreview);
       if (targetEntries.length > 1) {
         const [diaStr, ...pairParts] = key.split("-");
         conflictList.push({
@@ -450,7 +456,7 @@ export function SemesterScheduleView() {
     return {
       gridMap: map,
       conflicts: conflictList,
-      hasSaturday: saturdayUsed,
+      hasSaturday: saturdayUsed || saturdayPossible,
       totalIndividualBlocks: uniqueDayBlockSet.size,
       activeDaysCount: activeDaysSet.size,
       assignedCoursesCount: assignedCount,
@@ -872,7 +878,7 @@ export function SemesterScheduleView() {
                   </div>
                   <div className="text-sm font-black">
                     {conflicts.length === 0
-                      ? "Sin Topes ✓"
+                      ? "Sin Topes"
                       : `${conflicts.length} Tope(s)`}
                   </div>
                 </div>
@@ -1080,6 +1086,67 @@ export function SemesterScheduleView() {
                   <span className="text-[11px] text-muted-foreground">
                     Pasa el cursor sobre una opción para previsualizarla en la grilla
                   </span>
+                </div>
+
+                {/* Fixed-Height Static Inline Preview Status Bar (min-h-[44px], CLS = 0) */}
+                <div
+                  className={`min-h-[44px] px-3.5 py-1.5 rounded-lg border flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 text-xs transition-colors duration-150 ${
+                    activeComboPreview
+                      ? "border-[#D99B00]/40 bg-[#D99B00]/10 text-foreground"
+                      : "border-border/60 bg-muted/20 text-muted-foreground"
+                  }`}
+                >
+                  {activeComboPreview ? (
+                    <>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Eye className="h-4 w-4 text-[#D99B00] shrink-0" />
+                        <div className="truncate">
+                          <span className="font-bold text-[#002B49] dark:text-[#D99B00]">
+                            Previsualizando Opción {activeComboPreview.rank}:
+                          </span>
+                          <span className="text-muted-foreground ml-1.5 font-medium">
+                            {activeComboPreview.summaryBadges.join(" • ")}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="gold"
+                          onClick={() => handleApplyCombination(activeComboPreview)}
+                          className="h-7 text-xs font-semibold gap-1 shadow-2xs"
+                        >
+                          <Check className="h-3 w-3" />
+                          <span>Aplicar esta combinación</span>
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            setPreviewCombo(null);
+                            setHoveredCombo(null);
+                          }}
+                          className="h-7 text-xs text-muted-foreground hover:text-foreground"
+                        >
+                          <span>Cerrar</span>
+                        </Button>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex items-center justify-between w-full">
+                      <div className="flex items-center gap-2">
+                        <Eye className="h-4 w-4 text-muted-foreground/60 shrink-0" />
+                        <span>
+                          Pasa el cursor sobre una opción para previsualizar los bloques en la grilla semanal sin alterar tu selección actual.
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-muted-foreground/75 font-mono hidden md:inline">
+                        Hover interactivo
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -1446,46 +1513,22 @@ export function SemesterScheduleView() {
         </div>
 
         {/* Right Column: Weekly Schedule Grid */}
-        <div className="lg:col-span-8 space-y-2.5">
-          {activeComboPreview && (
-            <div className="p-2.5 rounded-lg border border-[#D99B00]/40 bg-[#D99B00]/10 flex flex-wrap items-center justify-between gap-2 text-xs animate-in fade-in">
-              <div className="flex items-center gap-2">
-                <Eye className="h-4 w-4 text-[#D99B00] shrink-0" />
-                <div>
-                  <span className="font-bold text-[#002B49] dark:text-[#D99B00]">
-                    Previsualizando Opción {activeComboPreview.rank}
-                  </span>
-                  <span className="text-muted-foreground ml-1.5 hidden sm:inline">
-                    ({activeComboPreview.summaryBadges.join(" • ")})
-                  </span>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="gold"
-                  onClick={() => handleApplyCombination(activeComboPreview)}
-                  className="h-7 text-xs font-semibold gap-1"
-                >
-                  <Check className="h-3 w-3" />
-                  <span>Aplicar esta combinación</span>
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => {
-                    setPreviewCombo(null);
-                    setHoveredCombo(null);
-                  }}
-                  className="h-7 text-xs text-muted-foreground hover:text-foreground"
-                >
-                  <span>Cerrar</span>
-                </Button>
-              </div>
-            </div>
-          )}
+        <div className="lg:col-span-8 space-y-3">
+          <div className="flex items-center justify-between h-5">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+              <Calendar className="h-4 w-4 text-[#002B49] dark:text-[#D99B00]" />
+              <span>Horario Semanal de Bloques</span>
+            </h3>
+            {activeComboPreview && (
+              <Badge
+                variant="outline"
+                className="text-[10px] font-semibold border-[#D99B00] text-amber-700 dark:text-amber-300 bg-amber-500/10 gap-1 animate-in fade-in"
+              >
+                <Eye className="h-3 w-3 text-[#D99B00]" />
+                <span>Previsualizando Opción {activeComboPreview.rank}</span>
+              </Badge>
+            )}
+          </div>
 
           <Card className="overflow-hidden">
             <CardContent className="p-0 overflow-x-auto">

@@ -17,6 +17,16 @@ export interface CriticalPathMetric {
   isCriticalBottleneck: boolean; // Identifica asignaturas críticas que bloquean el avance de la carrera
 }
 
+export interface PlanConflict {
+  courseSigla: string;
+  courseName: string;
+  courseSemester: number;
+  prereqSigla: string;
+  prereqName: string;
+  prereqSemester: number;
+  reason: string;
+}
+
 export interface SemesterCourseBreakdown {
   courses: Course[];
   totalSct: number;
@@ -506,3 +516,189 @@ export function planFastestGraduation(
     semestersBreakdown,
   };
 }
+
+/**
+ * Evalúa todos los cursos no aprobados en la planificación activa y retorna la lista
+ * de conflictos formales donde un ramo está planificado en un semestre menor o igual a uno de sus prerrequisitos.
+ */
+export function validatePlanConflicts(
+  allCourses: Course[],
+  approvedSiglas: Set<string> | string[],
+  plannedSemesterOverrides: Record<string, number>
+): PlanConflict[] {
+  const approvedSet = new Set<string>();
+  const rawApproved = approvedSiglas instanceof Set ? approvedSiglas : new Set(approvedSiglas);
+  for (const s of rawApproved) {
+    approvedSet.add(s.trim().toUpperCase());
+    approvedSet.add(normalizeCourseSigla(s));
+  }
+
+  const isApproved = (courseOrSigla: Course | string): boolean => {
+    const sigla = typeof courseOrSigla === 'string' ? courseOrSigla : courseOrSigla.sigla;
+    const norm = normalizeCourseSigla(sigla);
+    if (approvedSet.has(norm) || approvedSet.has(sigla.trim().toUpperCase())) {
+      return true;
+    }
+    if (
+      typeof courseOrSigla !== 'string' &&
+      Array.isArray(courseOrSigla.equivalencias_dnf) &&
+      courseOrSigla.equivalencias_dnf.length > 0
+    ) {
+      return courseOrSigla.equivalencias_dnf.some(
+        (clause) =>
+          clause.length > 0 &&
+          clause.every(
+            (eq) =>
+              approvedSet.has(normalizeCourseSigla(eq.sigla)) ||
+              approvedSet.has(eq.sigla.trim().toUpperCase())
+          )
+      );
+    }
+    return false;
+  };
+
+  const courseByNorm = new Map<string, Course>();
+  for (const c of allCourses) {
+    courseByNorm.set(normalizeCourseSigla(c.sigla), c);
+    courseByNorm.set(c.sigla.trim().toUpperCase(), c);
+  }
+
+  const getEffectiveSemester = (c: Course): number => {
+    return (
+      plannedSemesterOverrides[c.sigla] ??
+      plannedSemesterOverrides[normalizeCourseSigla(c.sigla)] ??
+      c.semestre
+    );
+  };
+
+  const conflicts: PlanConflict[] = [];
+  const reportedPairs = new Set<string>();
+
+  for (const course of allCourses) {
+    if (isApproved(course)) continue;
+
+    const courseSem = getEffectiveSemester(course);
+
+    // 1. Prerrequisitos estándar en arreglo
+    for (const prereqSigla of course.prerrequisitos) {
+      if (isApproved(prereqSigla)) continue;
+
+      const prereqCourse = courseByNorm.get(normalizeCourseSigla(prereqSigla));
+      const prereqSem = prereqCourse
+        ? getEffectiveSemester(prereqCourse)
+        : (plannedSemesterOverrides[prereqSigla] ?? 1);
+      const prereqName = prereqCourse ? prereqCourse.nombre : prereqSigla;
+      const cleanPrereqSigla = prereqCourse ? prereqCourse.sigla : prereqSigla;
+
+      if (courseSem <= prereqSem) {
+        const pairKey = `${course.sigla}->${cleanPrereqSigla}`;
+        if (!reportedPairs.has(pairKey)) {
+          reportedPairs.add(pairKey);
+          conflicts.push({
+            courseSigla: course.sigla,
+            courseName: course.nombre,
+            courseSemester: courseSem,
+            prereqSigla: cleanPrereqSigla,
+            prereqName,
+            prereqSemester: prereqSem,
+            reason: `${course.sigla} (Semestre ${courseSem}) está planificado al mismo tiempo o antes que su prerrequisito ${cleanPrereqSigla} (Semestre ${prereqSem})`,
+          });
+        }
+      }
+    }
+
+    // 2. Cláusulas DNF si existen
+    if (Array.isArray(course.requisitos_dnf) && course.requisitos_dnf.length > 0) {
+      const anyClauseSatisfied = course.requisitos_dnf.some((clause) =>
+        clause.every((r) => {
+          if (isApproved(r.sigla)) return true;
+          const pCourse = courseByNorm.get(normalizeCourseSigla(r.sigla));
+          const pSem = pCourse
+            ? getEffectiveSemester(pCourse)
+            : (plannedSemesterOverrides[r.sigla] ?? 1);
+          return courseSem > pSem;
+        })
+      );
+
+      if (!anyClauseSatisfied) {
+        for (const clause of course.requisitos_dnf) {
+          for (const r of clause) {
+            if (isApproved(r.sigla)) continue;
+            const pCourse = courseByNorm.get(normalizeCourseSigla(r.sigla));
+            const pSem = pCourse
+              ? getEffectiveSemester(pCourse)
+              : (plannedSemesterOverrides[r.sigla] ?? 1);
+
+            if (courseSem <= pSem) {
+              const cleanPrereqSigla = pCourse ? pCourse.sigla : r.sigla;
+              const prereqName = pCourse ? pCourse.nombre : r.sigla;
+              const pairKey = `${course.sigla}->${cleanPrereqSigla}`;
+              if (!reportedPairs.has(pairKey)) {
+                reportedPairs.add(pairKey);
+                conflicts.push({
+                  courseSigla: course.sigla,
+                  courseName: course.nombre,
+                  courseSemester: courseSem,
+                  prereqSigla: cleanPrereqSigla,
+                  prereqName,
+                  prereqSemester: pSem,
+                  reason: `${course.sigla} (Semestre ${courseSem}) está planificado al mismo tiempo o antes que su prerrequisito ${cleanPrereqSigla} (Semestre ${pSem})`,
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return conflicts;
+}
+
+/**
+ * Resuelve automáticamente todos los conflictos de prelación en la planificación:
+ * Recorre en orden topológico; si un curso tiene sem <= max(prereqSem), lo empuja
+ * a max(prereqSem) + 1. Retorna el mapa de overrides saneado sin conflictos.
+ */
+export function resolveAllPlanConflicts(
+  allCourses: Course[],
+  approvedSiglas: Set<string> | string[],
+  plannedSemesterOverrides: Record<string, number>
+): Record<string, number> {
+  const newOverrides: Record<string, number> = { ...plannedSemesterOverrides };
+
+  let iterations = 0;
+  const maxIterations = Math.max(allCourses.length * 3, 50);
+
+  while (iterations < maxIterations) {
+    const conflicts = validatePlanConflicts(allCourses, approvedSiglas, newOverrides);
+    if (conflicts.length === 0) break;
+
+    let changed = false;
+    for (const conf of conflicts) {
+      const course = allCourses.find(
+        (c) =>
+          c.sigla === conf.courseSigla ||
+          normalizeCourseSigla(c.sigla) === normalizeCourseSigla(conf.courseSigla)
+      );
+      if (!course) continue;
+
+      const currentSem =
+        newOverrides[course.sigla] ??
+        newOverrides[normalizeCourseSigla(course.sigla)] ??
+        course.semestre;
+
+      const targetSem = Math.max(currentSem, conf.prereqSemester + 1);
+      if (targetSem !== currentSem) {
+        newOverrides[course.sigla] = targetSem;
+        changed = true;
+      }
+    }
+
+    if (!changed) break;
+    iterations++;
+  }
+
+  return newOverrides;
+}
+

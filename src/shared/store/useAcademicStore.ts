@@ -17,6 +17,7 @@ import {
   planFastestGraduation,
   GraduationPlanResult,
   normalizeCourseSigla,
+  resolveAllPlanConflicts,
 } from '@/curricula/planner/criticalPathPlanner';
 import ici2014Data from '@/curricula/careers/ici-2014.json';
 import {
@@ -66,6 +67,7 @@ export interface AcademicStoreState {
     targetSemester: number,
     cascadePush?: boolean
   ) => MoveCourseResult;
+  resolvePlanConflicts: () => void;
   resetPlannedSemesters: () => void;
   applyAutoCriticalPathPlan: (maxCreditsSct?: number) => GraduationPlanResult;
   toggleCourseApproval: (sigla: string, grade?: number) => void;
@@ -201,93 +203,42 @@ export const useAcademicStore = create<AcademicStoreState>()(
           );
         };
 
-        // 1. REGLA INQUEBRANTABLE:
-        // Ningún ramo B puede planificarse en semestre <= al semestre de sus prerrequisitos no aprobados A.
-        for (const prereqSigla of targetCourse.prerrequisitos) {
-          if (isApproved(prereqSigla)) continue;
-
-          const prereqCourse = ramos.find(
-            (r) => normalizeCourseSigla(r.sigla) === normalizeCourseSigla(prereqSigla)
-          );
-          const prereqSem = prereqCourse
-            ? getEffectiveSemester(prereqCourse, plannedSemesterOverrides)
-            : 1;
-
-          if (targetSem <= prereqSem) {
-            const prereqName = prereqCourse
-              ? `${prereqCourse.nombre} (${prereqCourse.sigla})`
-              : prereqSigla;
-            return {
-              success: false,
-              reason: `No puedes mover ${targetCourse.nombre} (${targetCourse.sigla}) al Semestre ${targetSem} porque su prerrequisito ${prereqName} está planificado en el Semestre ${prereqSem}. La regla académica exige Semestre(${targetCourse.sigla}) > Semestre(${prereqSigla}).`,
-            };
-          }
-        }
-
-        // Evaluar cláusulas requisitos_dnf si existen
-        if (Array.isArray(targetCourse.requisitos_dnf) && targetCourse.requisitos_dnf.length > 0) {
-          const anyClauseMet = targetCourse.requisitos_dnf.some((clause) =>
-            clause.every((r) => {
-              if (isApproved(r.sigla)) return true;
-              const prereqCourse = ramos.find(
-                (c) => normalizeCourseSigla(c.sigla) === normalizeCourseSigla(r.sigla)
-              );
-              const prereqSem = prereqCourse
-                ? getEffectiveSemester(prereqCourse, plannedSemesterOverrides)
-                : 1;
-              return targetSem > prereqSem;
-            })
-          );
-          if (!anyClauseMet) {
-            return {
-              success: false,
-              reason: `No puedes mover ${targetCourse.nombre} (${targetCourse.sigla}) al Semestre ${targetSem} debido a restricciones de prerrequisitos disyuntivos (SIGA DNF).`,
-            };
-          }
-        }
-
-        // 2. Comprobar dependientes ya planificados:
-        // Si targetCourse se mueve hacia adelante a targetSem, cualquier ramo dependiente
-        // planificado en Semestre(dep) <= targetSem entra en conflicto.
+        // En modo libre de planificación: siempre permitimos colocar el ramo en targetSemester sin bloqueo rígido.
         const newOverrides: Record<string, number> = { ...plannedSemesterOverrides };
         newOverrides[targetCourse.sigla] = targetSem;
 
         const pushedList: string[] = [];
-        const queue: Array<{ sigla: string; minSem: number }> = [
-          { sigla: targetCourse.sigla, minSem: targetSem + 1 },
-        ];
-        const visited = new Set<string>();
+        if (cascadePush) {
+          const queue: Array<{ sigla: string; minSem: number }> = [
+            { sigla: targetCourse.sigla, minSem: targetSem + 1 },
+          ];
+          const visited = new Set<string>();
 
-        while (queue.length > 0) {
-          const { sigla: currSigla, minSem } = queue.shift()!;
-          const currNorm = normalizeCourseSigla(currSigla);
-          if (visited.has(currNorm)) continue;
-          visited.add(currNorm);
+          while (queue.length > 0) {
+            const { sigla: currSigla, minSem } = queue.shift()!;
+            const currNorm = normalizeCourseSigla(currSigla);
+            if (visited.has(currNorm)) continue;
+            visited.add(currNorm);
 
-          for (const depCourse of ramos) {
-            if (isApproved(depCourse.sigla)) continue;
+            for (const depCourse of ramos) {
+              if (isApproved(depCourse.sigla)) continue;
 
-            const dependsOnCurr =
-              depCourse.prerrequisitos.some(
-                (p) => normalizeCourseSigla(p) === currNorm
-              ) ||
-              (Array.isArray(depCourse.requisitos_dnf) &&
-                depCourse.requisitos_dnf.some((clause) =>
-                  clause.some((r) => normalizeCourseSigla(r.sigla) === currNorm)
-                ));
+              const dependsOnCurr =
+                depCourse.prerrequisitos.some(
+                  (p) => normalizeCourseSigla(p) === currNorm
+                ) ||
+                (Array.isArray(depCourse.requisitos_dnf) &&
+                  depCourse.requisitos_dnf.some((clause) =>
+                    clause.some((r) => normalizeCourseSigla(r.sigla) === currNorm)
+                  ));
 
-            if (dependsOnCurr) {
-              const currentDepSem = getEffectiveSemester(depCourse, newOverrides);
-              if (currentDepSem < minSem) {
-                if (!cascadePush) {
-                  return {
-                    success: false,
-                    reason: `Mover ${targetCourse.sigla} al Semestre ${targetSem} entra en conflicto con su ramo dependiente ${depCourse.nombre} (${depCourse.sigla}), que está en el Semestre ${currentDepSem}. Activa el desplazamiento en cascada para moverlo automáticamente al Semestre ${minSem}.`,
-                  };
+              if (dependsOnCurr) {
+                const currentDepSem = getEffectiveSemester(depCourse, newOverrides);
+                if (currentDepSem < minSem) {
+                  newOverrides[depCourse.sigla] = minSem;
+                  pushedList.push(`${depCourse.sigla} -> Semestre ${minSem}`);
+                  queue.push({ sigla: depCourse.sigla, minSem: minSem + 1 });
                 }
-                newOverrides[depCourse.sigla] = minSem;
-                pushedList.push(`${depCourse.sigla} ➔ Semestre ${minSem}`);
-                queue.push({ sigla: depCourse.sigla, minSem: minSem + 1 });
               }
             }
           }
@@ -307,6 +258,26 @@ export const useAcademicStore = create<AcademicStoreState>()(
           success: true,
           pushedCourses: pushedList.length > 0 ? pushedList : undefined,
         };
+      },
+
+      resolvePlanConflicts: () => {
+        const { curriculum, approvedCourses, plannedSemesterOverrides, customMaxSemester } = get();
+        const approvedSiglas = new Set(Object.keys(approvedCourses));
+        const sanitized = resolveAllPlanConflicts(
+          curriculum.ramos || [],
+          approvedSiglas,
+          plannedSemesterOverrides
+        );
+
+        let maxSem = customMaxSemester;
+        for (const s of Object.values(sanitized)) {
+          if (s > maxSem) maxSem = s;
+        }
+
+        set({
+          plannedSemesterOverrides: sanitized,
+          customMaxSemester: maxSem,
+        });
       },
 
       resetPlannedSemesters: () => {

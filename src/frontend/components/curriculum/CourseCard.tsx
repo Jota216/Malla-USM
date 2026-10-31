@@ -28,6 +28,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Calendar,
+  AlertTriangle,
 } from "lucide-react";
 
 interface CourseCardProps {
@@ -41,6 +42,7 @@ interface CourseCardProps {
   criticalMetric?: CriticalPathMetric;
   totalPlannedSemesters?: number;
   onMoveCourse?: (sigla: string, targetSemester: number, cascadePush?: boolean) => void;
+  hasConflict?: boolean;
 }
 
 export function CourseCard({
@@ -54,6 +56,7 @@ export function CourseCard({
   criticalMetric,
   totalPlannedSemesters = 11,
   onMoveCourse,
+  hasConflict = false,
 }: CourseCardProps) {
   const {
     curriculum,
@@ -118,12 +121,25 @@ export function CourseCard({
   }
 
   return (
-    <TooltipProvider delayDuration={350}>
-      <Tooltip>
+    <TooltipProvider delayDuration={1500} disableHoverableContent={true}>
+      <Tooltip delayDuration={1500} disableHoverableContent={true}>
         <TooltipTrigger asChild>
           <div
+            draggable={isPlannedMode}
+            onDragStart={(e) => {
+              if (isPlannedMode) {
+                e.dataTransfer.setData("text/plain", course.sigla);
+                e.dataTransfer.effectAllowed = "move";
+              }
+            }}
             onClick={handleCardClick}
-            className={`group relative flex flex-col justify-between rounded-lg p-2.5 transition-all text-xs border border-l-4 select-none min-h-[96px] ${statusCardStyle}`}
+            className={`group relative flex flex-col justify-between rounded-lg p-2.5 transition-all text-xs border border-l-4 select-none min-h-[96px] ${
+              isPlannedMode ? "cursor-grab active:cursor-grabbing hover:border-[#D99B00]" : ""
+            } ${
+              hasConflict && isPlannedMode
+                ? "border-amber-500 ring-1 ring-amber-500/60 bg-amber-50/50 dark:bg-amber-950/20"
+                : statusCardStyle
+            }`}
             style={{ borderLeftColor: areaColor }}
           >
             {/* Top Row: Sigla & Status Icons & Badges & Options dropdown */}
@@ -136,16 +152,19 @@ export function CourseCard({
                 {status === "LOCKED" && (
                   <Lock className="h-3 w-3 text-muted-foreground inline" />
                 )}
+                {hasConflict && isPlannedMode && (
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/40" title="Conflicto de prerrequisitos">
+                    <AlertTriangle className="h-2.5 w-2.5 shrink-0" />
+                    <span>Conflicto</span>
+                  </span>
+                )}
               </div>
 
               <div className="flex items-center gap-1" data-no-card-click="true">
                 {/* Critical Bottleneck Badges */}
                 {criticalMetric?.isCriticalBottleneck && status !== "APPROVED" && (
-                  <span
-                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-500/40 shadow-2xs"
-                    title={`Prioridad Crítica: L=${criticalMetric.criticalPathLength} semestres. Desbloquea ${criticalMetric.totalDescendantsCount} ramos.`}
-                  >
-                    🔥 Crítico
+                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-500/40 shadow-2xs">
+                    Crítico
                   </span>
                 )}
                 {!criticalMetric?.isCriticalBottleneck &&
@@ -153,11 +172,8 @@ export function CourseCard({
                   criticalMetric.criticalPathLength >= 3 &&
                   criticalMetric.totalDescendantsCount >= 3 &&
                   status !== "APPROVED" && (
-                    <span
-                      className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-extrabold bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/30"
-                      title={`Ramo clave para no atrasarse (desbloquea ${criticalMetric.totalDescendantsCount} ramos)`}
-                    >
-                      ⭐ Clave
+                    <span className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-extrabold bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/30">
+                      Clave
                     </span>
                   )}
 
@@ -165,7 +181,6 @@ export function CourseCard({
                 <span
                   className="inline-flex items-center justify-center h-4.5 min-w-4.5 px-1 rounded-full text-[9px] font-bold text-white shadow-xs"
                   style={{ backgroundColor: areaColor }}
-                  title={`ID #${course.id}`}
                 >
                   {course.id}
                 </span>
@@ -334,7 +349,7 @@ export function CourseCard({
         </TooltipTrigger>
 
         {/* Dynamic Tooltip content */}
-        <TooltipContent side="top" className="max-w-xs space-y-1 text-xs p-2.5">
+        <TooltipContent side="top" className="max-w-xs space-y-1 text-xs p-2.5 pointer-events-none select-none z-50">
           <div className="font-bold flex items-center justify-between gap-2">
             <span>{course.nombre}</span>
             <span className="font-mono text-[10px] text-slate-300 dark:text-slate-600">
@@ -342,9 +357,15 @@ export function CourseCard({
             </span>
           </div>
 
+          {hasConflict && isPlannedMode && (
+            <div className="text-amber-400 font-medium">
+              Conflicto: cursando antes o junto a sus prerrequisitos no aprobados.
+            </div>
+          )}
+
           {criticalMetric && status !== "APPROVED" && (
             <div className="py-1 px-1.5 rounded bg-slate-800/80 text-[10px] text-amber-300 font-mono flex items-center justify-between">
-              <span>Camino Crítico: {criticalMetric.criticalPathLength} semestres</span>
+              <span>{criticalMetric.isCriticalBottleneck ? "Prioridad Crítica" : criticalMetric.criticalPathLength >= 3 && criticalMetric.totalDescendantsCount >= 3 ? "Ramo Clave" : "Camino Crítico"}: L={criticalMetric.criticalPathLength} sem.</span>
               <span>Desbloquea: {criticalMetric.totalDescendantsCount}</span>
             </div>
           )}

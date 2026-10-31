@@ -286,9 +286,9 @@ export function generateOptimizationBadges(metrics: ScheduleOptimizationMetrics)
   const badges: string[] = [];
 
   if (metrics.clashCount === 0) {
-    badges.push('✓ 0 Topes');
+    badges.push('0 Topes');
   } else {
-    badges.push(`⚠ ${metrics.clashCount} Tope${metrics.clashCount > 1 ? 's' : ''}`);
+    badges.push(`${metrics.clashCount} Tope${metrics.clashCount > 1 ? 's' : ''}`);
   }
 
   if (metrics.windowBlocks === 0) {

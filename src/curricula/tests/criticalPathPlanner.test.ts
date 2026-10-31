@@ -1,4 +1,9 @@
-import { computeCriticalPathMetrics, planFastestGraduation } from '../planner/criticalPathPlanner';
+import {
+  computeCriticalPathMetrics,
+  planFastestGraduation,
+  validatePlanConflicts,
+  resolveAllPlanConflicts,
+} from '../planner/criticalPathPlanner';
 import { useAcademicStore } from '@/shared/store/useAcademicStore';
 import ici2014Data from '../careers/ici-2014.json';
 import { Course } from '@/shared/types/academic';
@@ -109,33 +114,45 @@ console.log('\nTest 2: planFastestGraduation Topological Order & Credit Constrai
 }
 
 // -------------------------------------------------------------
-// Test 3: Zustand Store Actions: movePlannedCourse & Cascade Push
+// Test 3: Free Drag & Drop, Conflict Detection & Auto-Resolution
 // -------------------------------------------------------------
-console.log('\nTest 3: Zustand Store movePlannedCourse Strict Rule & Cascading Push');
+console.log('\nTest 3: Free Drag & Drop, Conflict Detection & Auto-Resolution');
 {
   const store = useAcademicStore.getState();
   store.resetAll();
 
   // Fresh student: MAT-021 is at Sem 1, MAT-022 is at Sem 2.
   // MAT-021 is a prerequisite for MAT-022.
-  // Rule: Cannot move MAT-022 to Semestre 1 because MAT-021 is at Semestre 1!
-  const invalidMove = store.movePlannedCourse('MAT-022', 1, false);
-  assertEquals(invalidMove.success, false, 'Moving MAT-022 to Sem 1 must fail due to unapproved MAT-021');
+  // Free movement: Moving MAT-022 to Semestre 1 is ALLOWED (success: true) without rigid blocking!
+  const freeMove = store.movePlannedCourse('MAT-022', 1, false);
+  assertEquals(freeMove.success, true, 'Moving MAT-022 to Sem 1 must succeed in free planning mode');
+
+  // Verify that validatePlanConflicts detects the conflict
+  const conflictsBefore = validatePlanConflicts(
+    ramos,
+    new Set(),
+    useAcademicStore.getState().plannedSemesterOverrides
+  );
+  assert(conflictsBefore.length >= 1, 'Conflict must be detected between MAT-022 and MAT-021');
+  const mat22Conflict = conflictsBefore.find((c) => c.courseSigla === 'MAT-022');
+  assert(!!mat22Conflict, 'MAT-022 conflict must exist');
+  assertEquals(mat22Conflict!.courseSemester, 1, 'MAT-022 is at Sem 1');
+  assertEquals(mat22Conflict!.prereqSigla, 'MAT-021', 'Prerequisite is MAT-021');
+
+  // Auto-resolve conflicts: store.resolvePlanConflicts() must push MAT-022 to >= 2!
+  store.resolvePlanConflicts();
+  const conflictsAfter = validatePlanConflicts(
+    ramos,
+    new Set(),
+    useAcademicStore.getState().plannedSemesterOverrides
+  );
+  assertEquals(conflictsAfter.length, 0, 'All conflicts must be resolved');
   assert(
-    invalidMove.reason?.includes('MAT-021') ?? false,
-    'Failure reason must explicitly name prerequisite MAT-021'
+    useAcademicStore.getState().plannedSemesterOverrides['MAT-022'] >= 2,
+    'MAT-022 must be pushed to at least Semestre 2'
   );
 
-  // Moving MAT-021 forward to Semestre 3 when MAT-022 is at Semestre 2:
-  // Without cascade push, it must detect conflict with MAT-022.
-  const conflictMove = store.movePlannedCourse('MAT-021', 3, false);
-  assertEquals(conflictMove.success, false, 'Moving MAT-021 to Sem 3 without cascade must fail due to MAT-022');
-  assert(
-    conflictMove.reason?.includes('MAT-022') ?? false,
-    'Failure reason must explicitly name dependent MAT-022'
-  );
-
-  // With cascade push = true, moving MAT-021 to Sem 3 must automatically push MAT-022 to Sem 4!
+  // Moving MAT-021 forward to Semestre 3 with cascade push = true must automatically push MAT-022 to Sem 4!
   const cascadeMove = store.movePlannedCourse('MAT-021', 3, true);
   assertEquals(cascadeMove.success, true, 'Moving MAT-021 to Sem 3 with cascade must succeed');
   assert(
@@ -147,7 +164,7 @@ console.log('\nTest 3: Zustand Store movePlannedCourse Strict Rule & Cascading P
   assertEquals(updatedOverrides['MAT-021'], 3, 'MAT-021 planned at Sem 3');
   assert(updatedOverrides['MAT-022'] >= 4, `MAT-022 pushed to >= 4, got ${updatedOverrides['MAT-022']}`);
 
-  console.log('  ✓ Strict prerequisite blocking and cascade push validated successfully.');
+  console.log('  ✓ Free course move, conflict detection, and auto-resolution validated successfully.');
 }
 
 // -------------------------------------------------------------
@@ -175,6 +192,34 @@ console.log('\nTest 4: applyAutoCriticalPathPlan Store Action');
   );
 
   console.log(`  ✓ Auto-planner scheduled degree in ${result.totalSemesters} semesters at 28 SCT max.`);
+}
+
+// -------------------------------------------------------------
+// Test 5: Transitive Multi-Level Conflict Resolution
+// -------------------------------------------------------------
+console.log('\nTest 5: Transitive Multi-Level Conflict Resolution');
+{
+  // Artificially put MAT-021 in Sem 4, MAT-022 in Sem 2, MAT-023 in Sem 1, MAT-024 in Sem 1
+  const badOverrides: Record<string, number> = {
+    'MAT-021': 4,
+    'MAT-022': 2,
+    'MAT-023': 1,
+    'MAT-024': 1,
+  };
+
+  const conflicts = validatePlanConflicts(ramos, new Set(), badOverrides);
+  assert(conflicts.length >= 3, `Expected at least 3 conflicts, got ${conflicts.length}`);
+
+  const resolved = resolveAllPlanConflicts(ramos, new Set(), badOverrides);
+  const remainingConflicts = validatePlanConflicts(ramos, new Set(), resolved);
+  assertEquals(remainingConflicts.length, 0, 'Remaining conflicts after resolution must be 0');
+
+  assert(resolved['MAT-021'] === 4, 'MAT-021 remains at Sem 4');
+  assert(resolved['MAT-022'] >= 5, 'MAT-022 pushed to >= 5');
+  assert(resolved['MAT-023'] >= 6, 'MAT-023 pushed to >= 6');
+  assert(resolved['MAT-024'] >= 7, 'MAT-024 pushed to >= 7');
+
+  console.log('  ✓ Multi-level transitive chain conflicts cleanly resolved in topological order.');
 }
 
 console.log('\n========================================');

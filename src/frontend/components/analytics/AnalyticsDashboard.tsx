@@ -314,8 +314,9 @@ export function AnalyticsDashboard() {
                       </div>
                     )}
                     {isAutoCompleted && (
-                      <span className="inline-block text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
-                        ✓ Verificado automáticamente por avance de malla
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                        <CheckCircle2 className="h-3 w-3 inline shrink-0" />
+                        <span>Verificado automáticamente por avance de malla</span>
                       </span>
                     )}
                   </div>

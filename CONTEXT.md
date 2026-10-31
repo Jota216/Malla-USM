@@ -57,8 +57,8 @@ flowchart TD
 1. **Malla Curricular Interactiva y Modo "Mi Planificación" (Grafo DAG):**
    * Representación formal de la malla curricular multi-carrera (incluyendo Informática Plan 2014, Plan 2024 y catálogo multi-sede USM).
    * Clasificación reactiva del estado de cada asignatura: `APPROVED`, `IN_PROGRESS`, `AVAILABLE`, `LOCKED`.
-   * **Modo "Mi Planificación":** Permite al estudiante proyectar sus semestres futuros reordenando asignaturas y extendiendo la carrera a 12, 13 o más semestres. El sistema impone un **bloqueo estricto de prerrequisitos** y ofrece desplazamiento en cascada (*cascading push*) para no violar ninguna prelación.
-   * **Algoritmo de Ruta Crítica:** Identifica los cuellos de botella formativos mediante la longitud del camino crítico pendiente ($L_u$) y el conteo de descendientes transitivos ($D_u$), etiquetando ramos con insignias `🔥 Crítico` o `⭐ Clave`. Un auto-planificador voraz programa el camino de egreso más rápido posible respetando el límite máximo de créditos SCT configurado por el estudiante.
+   * **Modo "Mi Planificación":** Permite al estudiante proyectar sus semestres futuros mediante **Drag & Drop interactivo libre**, reordenando asignaturas y extendiendo la carrera a 12, 13 o más semestres. El sistema incorpora un validador reactivo no restrictivo que despliega una **alerta destacada en la parte superior** ante cualquier combinación imposible de prerrequisitos, junto con un botón de resolución automática en cascada y una insignia sutil de conflicto en cada tarjeta afectada.
+   * **Algoritmo de Ruta Crítica:** Identifica los cuellos de botella formativos mediante la longitud del camino crítico pendiente ($L_u$) y el conteo de descendientes transitivos ($D_u$), etiquetando ramos con insignias `Crítico` o `Clave` con un retardo de 1.5 segundos (`1500ms`) en sus popouts descriptivos para evitar cualquier intromisión visual al mover el cursor. Un auto-planificador voraz programa el camino de egreso más rápido posible respetando el límite máximo de créditos SCT configurado por el estudiante.
 
 2. **Planificador y Optimizador de Horarios Semanales SIGA:**
    * Integración de datos reales de oferta académica: paralelos, campus, profesores, salas y cupos.
@@ -67,7 +67,9 @@ flowchart TD
      2. *Minimizar Ventanas*: Compacta el horario agrupando bloques contiguos y eliminando tiempos muertos.
      3. *Maximizar Tiempo Libre*: Concéntrica las actividades para generar días completos o mañanas/tardes despejadas.
    * Búsqueda híbrida determinista con *Beam Search* cuando el espacio supera 5.000 combinaciones (tiempo de respuesta inferior a 50 ms).
+   * Previsualización instantánea con estabilidad dimensional garantizada (contenedor estático de altura mínima reservada `min-h-[44px]`, CLS = 0, sin temblores ni bucles de hover).
    * Reseñas psicopedagógicas de profesores y exportación directa de la agenda a formato `.ics` para calendarios externos.
+   * Interfaz sobria y profesional: erradicación total de emojis en favor de tipografía concisa e iconografía vectorial SVG de Lucide.
 
 3. **Calculadora y Solucionador de Notas ("Meta 55 - Grade Solver"):**
    * Deducción analítica inversa de notas necesarias en evaluaciones pendientes para alcanzar la nota mínima institucional ($NF \ge 55$).
@@ -449,10 +451,10 @@ Dado el subconjunto de asignaturas pendientes de aprobar $V_{\text{pend}} = \{ u
 
 #### 2. Clasificación de Cuellos de Botella Curriculares
 El algoritmo etiqueta automáticamente las asignaturas pendientes según su impacto potencial en el retraso del egreso:
-* **Asignatura Cuello de Botella Crítico (`🔥 Crítico`):** Asignatura cuya reprobación atrasa directamente la titulación:
+* **Asignatura Cuello de Botella Crítico (`Crítico`):** Asignatura cuya reprobación atrasa directamente la titulación:
   $$\text{isCriticalBottleneck}(u) \iff (L_u \ge 4) \lor (D_u \ge 6)$$
   *(Ejemplos típicos: `MAT-021`, `FIS-100`, `IWI-131`, `INF-134`).*
-* **Asignatura Clave (`⭐ Clave`):**
+* **Asignatura Clave (`Clave`):**
   $$\text{isKeyCourse}(u) \iff \neg\text{isCriticalBottleneck}(u) \land ((L_u \ge 3) \lor (D_u \ge 3))$$
 
 #### 3. Puntuación de Prioridad Heurística ($W_u$)
@@ -470,12 +472,19 @@ El auto-planificador (`planFastestGraduation`) distribuye las asignaturas pendie
    *(Si una única asignatura aislada excede el límite por sí misma, se le permite inscribirse para evitar bloqueos perpetuos).*
 4. **Avance Temporal:** Se incrementa $s \leftarrow s + 1$ y se repite el proceso hasta agotar $V_{\text{pend}}$.
 
-#### 5. Invariante Estricto Inquebrantable de Prerrequisitos
-Tanto el algoritmo automático como las acciones manuales de arrastre (`movePlannedCourse`) satisfacen estrictamente el siguiente teorema de consistencia:
-$$\forall B \in V_{\text{pend}}, \forall A \in \text{Prerrequisitos}(B) \cap V_{\text{pend}}: \quad \text{Semestre}(B) > \text{Semestre}(A)$$
+#### 5. Validación Reactiva de Prerrequisitos, Drag & Drop Libre y Alerta Superior
+En lugar de una restricción rígida que impida al estudiante arrastrar libremente las asignaturas para proyectar distintos escenarios, el sistema implementa una arquitectura reactiva permisiva con diagnóstico en tiempo real:
 
-* **Bloqueo de Movimiento Inválido:** Si el usuario intenta mover una asignatura $B$ a un semestre menor o igual al de su prerrequisito $A$, la acción es rechazada inmediatamente con un mensaje de diagnóstico que cita la sigla de la asignatura bloqueante.
-* **Propagación en Cascada (*Cascading Push*):** Si el usuario desplaza una asignatura $A$ a un semestre posterior $s_A$, y la opción de cascada está activada, todas las asignaturas dependientes transitivas $B$ se desplazan recursivamente en cascada a semestres $\ge s_A + 1$, preservando la validez del plan sin intervención manual repetitiva.
+1. **Movimiento Libre de Asignaturas (`movePlannedCourse`):**
+   El usuario puede arrastrar y soltar cualquier asignatura entre columnas de semestre libremente. La acción registra el nuevo semestre programado en `plannedSemesterOverrides` y expande dinámicamente el límite de semestres si es necesario.
+2. **Evaluación Continua de Conflictos (`validatePlanConflicts`):**
+   Una función pura audita la consistencia del plan evaluando la prelación formal de cada asignatura no aprobada:
+   $\text{Conflicto}(B, A) \iff B \in V_{\text{pend}} \land A \in \text{Prerrequisitos}(B) \cap V_{\text{pend}} \land \text{Semestre}(B) \le \text{Semestre}(A)$
+   Soporta cláusulas disyuntivas (DNF) y equivalencias académicas.
+3. **Banner Superior de Alerta de Combinaciones Imposibles:**
+   Si existen conflictos ($\text{planConflicts.length} > 0$), la grilla de "Mi Planificación" proyecta un banner ámbar en la cabecera detallando exactamente las incompatibilidades detectadas (ej. `MAT-022 (Sem 2) no puede cursarse antes de MAT-021 (Sem 3)`). Paralelamente, las tarjetas de asignaturas en falta exhiben una insignia discreta con ícono de advertencia y etiqueta textual `Conflicto`.
+4. **Resolución Automática en Cascada (`resolveAllPlanConflicts` / `resolvePlanConflicts`):**
+   Un botón destacado en el banner superior permite al estudiante corregir automáticamente todas las incompatibilidades con un solo clic. El algoritmo calcula el ordenamiento topológico de las dependencias y desplaza recursivamente cada asignatura dependiente a un semestre posterior factible $\max(\text{Semestre}(A)) + 1$, restableciendo un estado consistente con 0 conflictos.
 
 ---
 
@@ -500,6 +509,24 @@ Para evitar la pérdida accidental de información valiosa ingresada por el estu
 
 ## 5. Historial de Versiones (Changelog)
 
+### v1.4.1 — Drag & Drop Libre, Alerta de Conflictos, Estabilidad de Horarios y Purga de Emojis
+* **Drag & Drop Libre de Ramos en "Mi Planificación":**
+  * Soporte nativo HTML5 Drag & Drop con feedback visual (borde punteado dorado y glow en columnas de destino).
+  * Eliminación de bloqueos rígidos: el estudiante puede mover y experimentar con cualquier combinación de ramos entre semestres.
+* **Alerta Superior de Incompatibilidades y Auto-Resolución:**
+  * Banner dinámico reactivo en la cabecera de la grilla curricular ante combinaciones de prerrequisitos imposibles.
+  * Botón de auto-resolución algorítmica (`resolvePlanConflicts`) que reorganiza en cascada topológica las asignaturas en conflicto.
+  * Insignia sutil de advertencia textual (`Conflicto`) en las tarjetas involucradas.
+* **Retardo de 1.5s en Popouts de Criticidad:**
+  * Configuración de `delayDuration={1500}`, `disableHoverableContent={true}` y `pointer-events-none` en tooltips de criticidad (`CourseCard.tsx`), erradicando aperturas molestas al mover el mouse.
+* **Corrección de Temblor en Horario Semanal (CLS = 0):**
+  * Sustitución del banner dinámico que empujaba la tabla de horarios por un contenedor estático con altura fija (`min-h-[44px]`), eliminando por completo bucles de hover y saltos de layout.
+* **Interfaz Profesional Libre de Emojis:**
+  * Purga total de emojis y caracteres informales en la web; reemplazados por tipografía sobria e íconos vectoriales SVG de Lucide.
+* **Rebranding y Reconocimiento de Autoría:**
+  * Marca consolidada **Meta55**, autoría de **Joaquín D. Barrios** ([@Jota216](https://github.com/Jota216)) y **Jose Astudillo** ([@jastudilloi](https://github.com/jastudilloi)), y enlace oficial a `https://jota216.github.io/Malla-USM/`.
+
+
 ### v1.4.0 — Planificador Inteligente de Malla (Ruta Crítica), Optimizador Multi-Criterio de Horarios, UX Safety y Rebranding a Meta55
 * **Rebranding Oficial a Meta55 y Reconocimiento de Autoría:**
   * Actualización formal del sistema a **Meta55** (`Meta55 — USM Malla, Horario SIGA & Grade Solver`), reflejando la icónica meta institucional de los 55 puntos.
@@ -510,7 +537,7 @@ Para evitar la pérdida accidental de información valiosa ingresada por el estu
   * Regla estricta de prerrequisitos inquebrantable $\text{Semestre}(B) > \text{Semestre}(A)$ y opción de empujar dependientes en cascada (*cascading push*).
 * **Algoritmo de Ruta Crítica y Auto-Planificador de Salida Rápida:**
   * Cálculo reactivo de la longitud de ruta crítica ($L_u$) y potencial de desbloqueo transitivo ($D_u$).
-  * Badges visuales de criticidad formativa (`🔥 Crítico` y `⭐ Clave`) para orientar la prioridad semestral.
+  * Badges visuales de criticidad formativa (`Crítico` y `Clave`) para orientar la prioridad semestral.
   * Botón inteligente "⚡ Auto-Planificar Salida Rápida": algoritmo voraz que optimiza la titulación en el menor número de semestres posibles respetando un tope configurable de créditos SCT por semestre (por defecto 30 SCT).
 * **Motor de Optimización Multi-Criterio de Horarios SIGA:**
   * Evaluación algorítmica de combinaciones de paralelos sobre máscaras de bits por día.

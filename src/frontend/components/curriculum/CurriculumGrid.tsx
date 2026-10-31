@@ -2,7 +2,10 @@ import * as React from "react";
 import { useAcademicStore } from "@/shared/store/useAcademicStore";
 import { getCatalogPlans } from "@/curricula/services/curriculumService";
 import { CareerPlanCatalogItem, Course } from "@/shared/types/academic";
-import { computeCriticalPathMetrics } from "@/curricula/planner/criticalPathPlanner";
+import {
+  computeCriticalPathMetrics,
+  validatePlanConflicts,
+} from "@/curricula/planner/criticalPathPlanner";
 import { SemesterColumn } from "./SemesterColumn";
 import { CourseDetailModal } from "./CourseDetailModal";
 import { Input } from "@/frontend/components/ui/input";
@@ -58,6 +61,7 @@ export function CurriculumGrid({ onNavigateToSolver }: CurriculumGridProps) {
     setMaxCreditsPerSemester,
     setCustomMaxSemester,
     movePlannedCourse,
+    resolvePlanConflicts,
     resetPlannedSemesters,
     applyAutoCriticalPathPlan,
   } = useAcademicStore();
@@ -124,6 +128,21 @@ export function CurriculumGrid({ onNavigateToSolver }: CurriculumGridProps) {
     }
     return count;
   }, [criticalMetrics]);
+
+  // Plan conflicts in planned mode
+  const planConflicts = React.useMemo(() => {
+    if (plannerMode !== "planned") return [];
+    const approvedSiglas = new Set(Object.keys(approvedCourses));
+    return validatePlanConflicts(
+      curriculum.ramos || [],
+      approvedSiglas,
+      plannedSemesterOverrides
+    );
+  }, [plannerMode, curriculum.ramos, approvedCourses, plannedSemesterOverrides]);
+
+  const conflictingSiglasSet = React.useMemo(() => {
+    return new Set(planConflicts.flatMap((c) => [c.courseSigla, c.prereqSigla]));
+  }, [planConflicts]);
 
   // Dynamic semester count based on official malla or planned overrides
   const totalSemesters = React.useMemo(() => {
@@ -437,6 +456,60 @@ export function CurriculumGrid({ onNavigateToSolver }: CurriculumGridProps) {
           )}
         </div>
 
+        {/* Impossible Prerequisites Conflict Banner in Planning Mode */}
+        {plannerMode === "planned" && planConflicts.length > 0 && (
+          <Alert
+            variant="warning"
+            className="border-amber-500/70 bg-amber-500/10 text-amber-900 dark:text-amber-200 p-3 sm:p-4 rounded-xl shadow-xs"
+          >
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+              <div className="space-y-1.5 flex-1">
+                <div className="flex items-center gap-2 font-bold text-sm text-amber-800 dark:text-amber-300">
+                  <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
+                  <span>
+                    Combinación imposible de prerrequisitos detectada ({planConflicts.length} conflicto{planConflicts.length === 1 ? "" : "s"})
+                  </span>
+                </div>
+                <p className="text-xs text-amber-900/90 dark:text-amber-300/90">
+                  Tienes ramos planificados antes o al mismo tiempo que sus asignaturas prerrequisito:
+                </p>
+                <ul className="text-xs space-y-1 font-mono pt-1 max-h-36 overflow-y-auto pl-1">
+                  {planConflicts.slice(0, 5).map((conf, idx) => (
+                    <li key={idx} className="flex items-center gap-1.5 text-amber-950 dark:text-amber-100">
+                      <span className="text-amber-600 font-bold">•</span>
+                      <span>
+                        <strong>{conf.courseSigla}</strong> (Sem {conf.courseSemester}) no puede cursarse antes de{" "}
+                        <strong>{conf.prereqSigla}</strong> (Sem {conf.prereqSemester})
+                      </span>
+                    </li>
+                  ))}
+                  {planConflicts.length > 5 && (
+                    <li className="text-[11px] text-amber-700 dark:text-amber-400 italic">
+                      ... y {planConflicts.length - 5} conflicto{planConflicts.length - 5 === 1 ? "" : "s"} más.
+                    </li>
+                  )}
+                </ul>
+              </div>
+
+              <div className="sm:self-center shrink-0">
+                <Button
+                  type="button"
+                  variant="gold"
+                  size="sm"
+                  onClick={() => {
+                    resolvePlanConflicts();
+                    setPlannerFeedback("¡Conflictos resueltos automáticamente! Los ramos dependientes fueron desplazados.");
+                  }}
+                  className="h-8 gap-1.5 text-xs font-bold shadow-xs whitespace-nowrap"
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Corregir conflictos automáticamente
+                </Button>
+              </div>
+            </div>
+          </Alert>
+        )}
+
         {/* Informative Planner Feedback Banner */}
         {plannerFeedback && (
           <Alert
@@ -626,6 +699,8 @@ export function CurriculumGrid({ onNavigateToSolver }: CurriculumGridProps) {
                 criticalMetrics={criticalMetrics}
                 totalPlannedSemesters={totalSemesters}
                 onMoveCourse={handleMoveCourse}
+                onCourseDrop={handleMoveCourse}
+                conflictingSiglas={conflictingSiglasSet}
               />
             );
           })}

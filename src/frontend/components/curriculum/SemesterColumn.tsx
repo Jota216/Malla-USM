@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Course, CourseStatusDetail } from "@/shared/types/academic";
 import { CriticalPathMetric } from "@/curricula/planner/criticalPathPlanner";
 import { CourseCard } from "./CourseCard";
@@ -17,6 +18,8 @@ interface SemesterColumnProps {
   criticalMetrics?: Map<string, CriticalPathMetric>;
   totalPlannedSemesters?: number;
   onMoveCourse?: (sigla: string, targetSemester: number, cascadePush?: boolean) => void;
+  onCourseDrop?: (sigla: string, targetSemester: number) => void;
+  conflictingSiglas?: Set<string>;
 }
 
 const ROMAN_NUMERALS = [
@@ -56,8 +59,11 @@ export function SemesterColumn({
   criticalMetrics,
   totalPlannedSemesters = 11,
   onMoveCourse,
+  onCourseDrop,
+  conflictingSiglas,
 }: SemesterColumnProps) {
   const roman = ROMAN_NUMERALS[semesterNumber] || `${semesterNumber}`;
+  const [isDragOver, setIsDragOver] = useState(false);
 
   // Semester metrics
   const totalCourses = courses.length;
@@ -74,8 +80,30 @@ export function SemesterColumn({
 
   return (
     <div
-      className={`flex flex-col w-[215px] shrink-0 rounded-xl p-2.5 border shadow-2xs transition-colors ${
-        isOverCreditLimit
+      onDragOver={(e) => {
+        if (!isPlannedMode) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        if (!isDragOver) setIsDragOver(true);
+      }}
+      onDragLeave={(e) => {
+        if (!isPlannedMode) return;
+        if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+        setIsDragOver(false);
+      }}
+      onDrop={(e) => {
+        if (!isPlannedMode) return;
+        e.preventDefault();
+        setIsDragOver(false);
+        const sigla = e.dataTransfer.getData("text/plain");
+        if (sigla && onCourseDrop) {
+          onCourseDrop(sigla, semesterNumber);
+        }
+      }}
+      className={`flex flex-col w-[215px] shrink-0 rounded-xl p-2.5 border shadow-2xs transition-all ${
+        isDragOver
+          ? "border-dashed border-2 border-[#D99B00] bg-[#D99B00]/10 ring-2 ring-[#D99B00]/30 shadow-md"
+          : isOverCreditLimit
           ? "bg-amber-50/70 dark:bg-amber-950/20 border-amber-300 dark:border-amber-800"
           : "bg-slate-50/70 dark:bg-slate-900/40 border-border/80"
       }`}
@@ -192,6 +220,7 @@ export function SemesterColumn({
                 criticalMetric={criticalMetrics?.get(course.sigla)}
                 totalPlannedSemesters={totalPlannedSemesters}
                 onMoveCourse={onMoveCourse}
+                hasConflict={conflictingSiglas?.has(course.sigla)}
               />
             );
           })
