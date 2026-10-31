@@ -1,6 +1,6 @@
 # Meta55 — USM Malla, Horario SIGA & Grade Solver
 
-> 🌐 **Sitio Web Oficial:** [https://jota216.github.io/Malla-USM/](https://jota216.github.io/Malla-USM/)
+> 🌐 **Sitio Web Oficial:** [https://meta55-dev.github.io/Malla-USM/](https://meta55-dev.github.io/Malla-USM/)
 
 Aplicación web interactiva de código abierto diseñada para estudiantes de todas las sedes y carreras de la **Universidad Técnica Federico Santa María (USM)**. Permite gestionar el avance de la malla curricular, planificar semestres con un motor de ruta crítica para egresar a tiempo, optimizar el horario semanal con datos reales de SIGA y calcular de forma exacta las notas necesarias para alcanzar la **Meta 55**.
 
@@ -13,7 +13,7 @@ Este proyecto es desarrollado y mantenido por:
 * **Joaquín D. Barrios** — GitHub: [@Jota216](https://github.com/Jota216)
 * **Jose Astudillo** — GitHub: [@jastudilloi](https://github.com/jastudilloi)
 
-🔗 **Acceso a la plataforma:** [https://jota216.github.io/Malla-USM/](https://jota216.github.io/Malla-USM/)
+🔗 **Acceso a la plataforma:** [https://meta55-dev.github.io/Malla-USM/](https://meta55-dev.github.io/Malla-USM/)
 
 ---
 
