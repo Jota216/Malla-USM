@@ -189,6 +189,14 @@ courses7.forEach((cId, idx) => {
   ];
 });
 
+// Warm up JIT
+optimizeSchedule({
+  courses: courses7,
+  parallelsByCourse: parallelsByCourseLarge,
+  strategy: 'maximize_free_time',
+  maxResults: 1,
+});
+
 const tStartLarge = performance.now();
 const resultsBeam = optimizeSchedule({
   courses: courses7,

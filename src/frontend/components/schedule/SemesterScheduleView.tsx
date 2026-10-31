@@ -27,6 +27,11 @@ import { Badge } from "@/frontend/components/ui/badge";
 import { Button } from "@/frontend/components/ui/button";
 import { Input } from "@/frontend/components/ui/input";
 import {
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+} from "@/frontend/components/ui/popover";
+import {
   Calendar,
   Clock,
   AlertTriangle,
@@ -643,6 +648,41 @@ export function SemesterScheduleView() {
     URL.revokeObjectURL(url);
   };
 
+  const conflictPopoverContent = (
+    <PopoverContent
+      align="end"
+      sideOffset={6}
+      className="w-80 p-3 shadow-xl z-50 text-xs space-y-2 border-destructive/40"
+    >
+      <div className="flex items-center gap-1.5 font-bold text-destructive pb-1.5 border-b border-border/50">
+        <AlertTriangle className="h-4 w-4 shrink-0" />
+        <span>Detalle de Topes ({conflicts.length})</span>
+      </div>
+      <div className="max-h-60 overflow-y-auto space-y-1.5 pr-1">
+        {conflicts.map((c, idx) => (
+          <div
+            key={idx}
+            className="p-2 rounded-md bg-destructive/10 border border-destructive/20 text-foreground space-y-1"
+          >
+            <div className="font-semibold text-destructive flex items-center gap-1">
+              <span>
+                {USM_BAR_DAYS[c.dia]} Bloque {c.pair}:
+              </span>
+            </div>
+            <div className="text-[11px] text-muted-foreground leading-snug">
+              {c.entries
+                .map((e) => `${e.sigla} (Par. ${e.paralelo})`)
+                .join(" choca con ")}
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="text-[10px] text-muted-foreground pt-1 border-t border-border/40 text-center">
+        Cambia de paralelo o usa el Auto-Optimizador para resolver colisiones.
+      </p>
+    </PopoverContent>
+  );
+
   return (
     <div className="space-y-5">
       {/* Header & Controls Card */}
@@ -703,6 +743,33 @@ export function SemesterScheduleView() {
 
               {enrolledSiglas.length > 0 && (
                 <>
+                  {/* Compact Clash Badge / Interactive Popover Button (h-8) */}
+                  {conflicts.length === 0 ? (
+                    <div className="h-8 px-2.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 text-xs font-semibold flex items-center gap-1.5">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      <span>0 Topes</span>
+                    </div>
+                  ) : (
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 px-2.5 text-xs font-semibold gap-1.5 border-destructive/50 bg-destructive/10 text-destructive hover:bg-destructive/20 shadow-xs"
+                          title="Ver detalle de bloques en conflicto"
+                        >
+                          <AlertTriangle className="h-3.5 w-3.5" />
+                          <span>
+                            {conflicts.length}{" "}
+                            {conflicts.length === 1 ? "Tope" : "Topes"}
+                          </span>
+                        </Button>
+                      </PopoverTrigger>
+                      {conflictPopoverContent}
+                    </Popover>
+                  )}
+
                   <Button
                     type="button"
                     variant={showOptimizerPanel ? "usm" : "gold"}
@@ -865,53 +932,41 @@ export function SemesterScheduleView() {
                 <Calendar className="h-4 w-4 text-emerald-500" />
               </div>
 
-              <div
-                className={`p-2.5 rounded-lg border flex items-center justify-between ${
-                  conflicts.length > 0
-                    ? "border-destructive/50 bg-destructive/10 text-destructive"
-                    : "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                }`}
-              >
-                <div>
-                  <div className="text-[10px] uppercase font-semibold opacity-80">
-                    Estado de Topes
+              {conflicts.length === 0 ? (
+                <div className="p-2.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 flex items-center justify-between">
+                  <div>
+                    <div className="text-[10px] uppercase font-semibold opacity-80">
+                      Estado de Topes
+                    </div>
+                    <div className="text-sm font-black">0 Topes</div>
                   </div>
-                  <div className="text-sm font-black">
-                    {conflicts.length === 0
-                      ? "Sin Topes"
-                      : `${conflicts.length} Tope(s)`}
-                  </div>
-                </div>
-                {conflicts.length > 0 ? (
-                  <AlertTriangle className="h-4 w-4 shrink-0" />
-                ) : (
                   <CheckCircle2 className="h-4 w-4 shrink-0" />
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Conflict Details List if any */}
-          {conflicts.length > 0 && (
-            <div className="p-2.5 rounded-lg border border-destructive/50 bg-destructive/10 text-destructive text-xs flex items-start gap-2.5">
-              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-              <div>
-                <div className="font-bold">
-                  Detalle de bloques en conflicto:
                 </div>
-                <ul className="mt-1 space-y-0.5 list-disc list-inside">
-                  {conflicts.map((c, idx) => (
-                    <li key={idx}>
-                      <strong>
-                        {USM_BAR_DAYS[c.dia]} Bloque {c.pair}:
-                      </strong>{" "}
-                      {c.entries
-                        .map((e) => `${e.sigla} (Par. ${e.paralelo})`)
-                        .join(" choca con ")}
-                    </li>
-                  ))}
-                </ul>
-              </div>
+              ) : (
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className="p-2.5 rounded-lg border border-destructive/50 bg-destructive/10 text-destructive flex items-center justify-between text-left cursor-pointer hover:bg-destructive/15 transition-colors focus:outline-none focus:ring-2 focus:ring-destructive/40"
+                      title="Ver detalle de topes"
+                    >
+                      <div>
+                        <div className="text-[10px] uppercase font-semibold opacity-80">
+                          Estado de Topes
+                        </div>
+                        <div className="text-sm font-black">
+                          {conflicts.length}{" "}
+                          {conflicts.length === 1
+                            ? "Tope - Ver detalle"
+                            : "Topes - Ver detalle"}
+                        </div>
+                      </div>
+                      <AlertTriangle className="h-4 w-4 shrink-0" />
+                    </button>
+                  </PopoverTrigger>
+                  {conflictPopoverContent}
+                </Popover>
+              )}
             </div>
           )}
         </CardContent>

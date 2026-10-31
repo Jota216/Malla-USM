@@ -295,7 +295,7 @@ export function generateOptimizationBadges(metrics: ScheduleOptimizationMetrics)
     badges.push('0 Ventanas');
   } else {
     badges.push(
-      `${metrics.windowBlocks} Bloque${metrics.windowBlocks > 1 ? 's' : ''} de ventana`
+      `${metrics.windowBlocks} Ventana${metrics.windowBlocks > 1 ? 's' : ''}`
     );
   }
 

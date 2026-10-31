@@ -67,6 +67,7 @@ flowchart TD
      2. *Minimizar Ventanas*: Compacta el horario agrupando bloques contiguos y eliminando tiempos muertos.
      3. *Maximizar Tiempo Libre*: Concéntrica las actividades para generar días completos o mañanas/tardes despejadas.
    * Búsqueda híbrida determinista con *Beam Search* cuando el espacio supera 5.000 combinaciones (tiempo de respuesta inferior a 50 ms).
+   * **Interfaz de Diagnóstico de Topes sin Reflujo (On-Demand Clash Inspector):** Las colisiones horarias se resumen mediante un contador numérico compacto de altura fija (`h-8`: `0 Topes` o `N Topes`) y su desglose detallado se renderiza exclusivamente bajo demanda (clic del usuario) a través de una capa superpuesta (*Portal* de Radix UI Popover), garantizando estabilidad visual total (`Zero Cumulative Layout Shift / CLS = 0`) durante la selección de paralelos y la auto-optimización.
    * Previsualización instantánea con estabilidad dimensional garantizada (contenedor estático de altura mínima reservada `min-h-[44px]`, CLS = 0, sin temblores ni bucles de hover).
    * Reseñas psicopedagógicas de profesores y exportación directa de la agenda a formato `.ics` para calendarios externos.
    * Interfaz sobria y profesional: erradicación total de emojis en favor de tipografía concisa e iconografía vectorial SVG de Lucide.
@@ -93,6 +94,7 @@ flowchart TD
         PlannerMode[Modo Mi Planificación & Controles SCT]
         ScheduleView[SemesterScheduleView & Grid Semanal]
         ScheduleOptimizerUI[ScheduleOptimizer & Controles de Estrategia]
+        ClashInspector[ClashInspector Portal CLS=0]
         ProfModal[ProfessorReviewModal - Reseñas Docentes]
         SolverView[SemesterSolver & CourseSolverCard]
         UXSafety[AlertDialog UX Safety - Protección de Borrado]
@@ -432,6 +434,22 @@ Dado el conjunto de asignaturas $\{C_1, \dots, C_k\}$ con número de paralelos o
 * **Espacio Pequeño ($|\Omega| \le 5.000$ combinaciones):** Se ejecuta una búsqueda exhaustiva cartesiana determinista completa, garantizando el óptimo global absoluto.
 * **Espacio Grande ($|\Omega| > 5.000$ combinaciones):** Se activa un algoritmo voraz guiado por haz (**Beam Search** con ancho de haz $W = 60$). En cada etapa de adición de una asignatura, se expanden las combinaciones candidatas y se retienen únicamente las $W$ mejores según la función de puntuación de la estrategia elegida. Esto acota la complejidad temporal a $O(k \cdot W \cdot \max |P|)$, garantizando un tiempo de respuesta en el navegador inferior a **50 ms** incluso para combinaciones masivas ($4^7 = 16.384$ estados).
 
+#### 6. Interfaz de Diagnóstico de Topes sin Reflujo (On-Demand Clash Inspector)
+Para optimizar el rendimiento interactivo y garantizar la estabilidad visual según los estándares de Core Web Vitals:
+1. **Erradicación de Banners y Listas Dinámicas en el Flujo del DOM:**
+   * En versiones preliminares, la inserción reactiva de banners y alertas de colisión en el flujo del documento generaba desplazamientos bruscos (*layout shifts*, CLS > 0.1) que empujaban la grilla horaria cada vez que cambiaba la selección de un paralelo o se alternaban cursos.
+   * La supresión de estos contenedores dinámicos en el DOM normal elimina por completo los saltos visuales verticales de la grilla horaria.
+2. **Botón Indicador Numérico Compacto de Altura Fija (`h-8`):**
+   * El diagnóstico global de colisiones se consolidó en la barra de herramientas dentro de un botón/indicador de altura estrictamente fija de 32px (`h-8`):
+     * **Cero Topes (`conflicts.length === 0`):** Badge estático verde esmeralda (`border-emerald-500/30 bg-emerald-500/10`) con ícono vectorial `CheckCircle2` y texto `0 Topes`.
+     * **Con Topes (`conflicts.length > 0`):** Botón interactivo de advertencia (`border-destructive/50 bg-destructive/10 text-destructive`) con ícono vectorial `AlertTriangle` y contador dinámico `N Topes` (`PopoverTrigger asChild`).
+3. **Inspección Detallada Bajo Demanda vía Portal Fuera del Documento (`Popover` de Radix UI):**
+   * El desglose detallado de las colisiones (qué asignaturas y paralelos chocan en qué día y par de bloques) se renderiza exclusivamente cuando el usuario hace clic deliberado sobre el botón de topes.
+   * Dicho contenido se monta fuera del árbol de renderizado del documento padre a través de una capa superpuesta (*Portal* de Radix UI: `<PopoverPrimitive.Portal>`), configurado con `align="end"` y `sideOffset={6}`.
+   * Al estar aislado en una capa flotante z-index `z-50`, el despliegue del modal o su cierre tiene **impacto cero en las coordenadas de la grilla horaria (`Cumulative Layout Shift / CLS = 0`)**.
+4. **Eliminación de Bucles y Eventos Hover en Alertas:**
+   * Se erradicaron los disparadores de tipo hover o mouse-over en las advertencias de colisiones, eliminando de raíz los reflujos cíclicos de renderizado (*layout thrashing*) inducidos por el movimiento involuntario del cursor sobre la tabla.
+
 ---
 
 ### 4.9 Algoritmo de Ruta Crítica y Planificación Curricular Restringida por Créditos
@@ -508,6 +526,18 @@ Para evitar la pérdida accidental de información valiosa ingresada por el estu
 ---
 
 ## 5. Historial de Versiones (Changelog)
+
+### v1.4.2 — Inspector de Topes On-Demand sin Reflujo (Zero Layout Shift) y Estabilidad Horaria
+* **Erradicación de Banners Dinámicos de Colisiones en `SemesterScheduleView.tsx`:**
+  * Eliminación de paneles y listas dinámicas de advertencia dentro del flujo normal del documento HTML que empujaban la grilla horaria verticalmente al cambiar de paralelos o re-calcular topes.
+* **Botón Indicador Numérico Compacto (`h-8`) y Desglose Exclusivo por Clic mediante Radix Popover Portal:**
+  * Sustitución de alertas expansivas por un botón/insignia de altura fija de 32px (`h-8`) en la barra de herramientas: badge `0 Topes` (`CheckCircle2`) en estado consistente y botón interactivo destructivo `N Topes` (`AlertTriangle`) ante conflictos.
+  * Inspección profunda de choques renderizada exclusivamente a petición del usuario (clic intencional) a través de un `Popover` desacoplado del documento mediante `<PopoverPrimitive.Portal>` (`align="end"`, `sideOffset={6}`), garantizando estabilidad visual total (`Zero Cumulative Layout Shift / CLS = 0`).
+  * Supresión total de bucles de hover y parpadeos visuales al mover el mouse sobre las colisiones.
+* **Formato de Métricas Estandarizado y Conciso en Tarjetas del Auto-Optimizador:**
+  * Resumen unificado en el Top 3 de sugerencias combinatorias de horarios: `0 Topes • X Ventanas • X Días libres` (o medios días libres).
+* **Cero Emojis Crudos y Uso Exclusivo de Íconos Vectoriales SVG de Lucide:**
+  * Depuración exhaustiva de emojis en componentes de horario y optimización; sustituidos por iconografía profesional escalable (`CheckCircle2`, `AlertTriangle`, `Clock`, `Calendar`, `Sparkles`, `Wand2`, `Eye`).
 
 ### v1.4.1 — Drag & Drop Libre, Alerta de Conflictos, Estabilidad de Horarios y Purga de Emojis
 * **Drag & Drop Libre de Ramos en "Mi Planificación":**
