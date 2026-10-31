@@ -147,9 +147,13 @@ Malla_USM/
 │   │   │   │   ├── DataBackupModal.tsx    # Modal de exportación/importación de JSON
 │   │   │   │   ├── Footer.tsx             # Pie institucional USM de código abierto
 │   │   │   │   └── Navbar.tsx             # Navegación principal, contadores y botones de acción
+│   │   │   ├── schedule/
+│   │   │   │   ├── SemesterScheduleView.tsx# Planificador interactivo de horario semanal y exportación .ics
+│   │   │   │   └── ProfessorReviewModal.tsx# Ficha docente con 7 métricas, bimodalidad y opiniones
 │   │   │   ├── solver/
-│   │   │   │   ├── CourseSolverCard.tsx   # Tarjeta modular para cálculo individual de ramo
+│   │   │   │   ├── CourseSolverCard.tsx   # Tarjeta modular para cálculo individual con Simulador Global y Bonus
 │   │   │   │   ├── FormulaBuilder.tsx     # Editor estructurado de grupos, pesos y evaluaciones
+│   │   │   │   ├── FormulaEditorModal.tsx # Modal de configuración interactiva de fórmula y bonificaciones
 │   │   │   │   ├── InteractiveSliders.tsx # Sliders dinámicos para simulación de notas "what-if"
 │   │   │   │   ├── SemesterSolver.tsx     # Vista orquestadora de asignaturas en curso
 │   │   │   │   └── SolverOutput.tsx       # Desglose numérico y alertas de restricción vinculante
@@ -168,14 +172,18 @@ Malla_USM/
 │   ├── wolfram-solver/             # Dominio motor algebraico ("WolframAlpha USM") y plantillas
 │   │   ├── engine/
 │   │   │   ├── gradeSolver.ts             # Algoritmo de resolución lineal y análisis de restricciones
-│   │   │   └── subFormulaSolver.ts        # Motor matemático para sub-fórmulas y regla de penalización USM
+│   │   │   └── subFormulaSolver.ts        # Motor matemático para sub-fórmulas, alpha dinámico y Simulador Global
 │   │   ├── templates/
-│   │   │   ├── defaultTemplates.ts        # Silabos base y ponderaciones estándar USM
+│   │   │   ├── defaultTemplates.ts        # Silabos base, heurísticas y sincronización automática
+│   │   │   ├── formulaPresets.ts          # Catálogo oficial SIGA (36 ramos) y plantillas departamentales
 │   │   │   └── inf292Template.ts          # Plantilla oficial INF-292 (PCE, PC, PP con mínimos)
 │   │   ├── tests/
 │   │   │   ├── gradeSolver.test.ts        # Suite de tests unitarios del solver general
 │   │   │   └── subFormulaSolver.test.ts   # Suite de tests unitarios de sub-fórmulas y mínimos de bloque
 │   │   └── index.ts                # Punto de exportación pública del motor wolfram-solver
+│   ├── scripts/                    # Scripts de extracción y automatización de datos SIGA
+│   │   ├── extract-siga-formulas.mjs      # Extractor multi-patrón de fórmulas desde PDFs de programas SIGA
+│   │   └── siga-scraper/                  # Motor autónomo de extracción de carreras, horarios y profesores
 │   ├── App.tsx                     # Componente raíz con control de vistas por pestañas
 │   └── main.tsx                    # Punto de entrada de la aplicación en el DOM
 ├── index.html                      # Plantilla HTML5 con viewport optimizado
@@ -254,6 +262,62 @@ $$\text{NF} = \begin{cases}
 
 ---
 
+### 4.5 Fórmulas por Tramos con Peso Dinámico $\alpha(PC)$ (`INF-245`, `INF-256`)
+En asignaturas de especialidad como **INF-245** (*Arquitectura y Organización de Computadores*) e **INF-256** (*Redes de Computadores*), el programa de estudios oficial de SIGA USM no contempla una ponderación fija para las tareas/laboratorios ($PT$), sino un peso paramétrico $\alpha$ dependiente del promedio obtenido en los certámenes ($PC$):
+
+$$NF = PC \times (1 - \alpha) + \alpha \times T, \quad T \ge 60$$
+
+donde la función por tramos $\alpha(PC)$ se define como:
+
+$$\alpha(PC) = \begin{cases} 
+0.30 & \text{si } PC \ge 60 \text{ (aprovechamiento máximo de tareas)} \\
+0 & \text{si } PC \le 30 \text{ (las tareas no aportan a la aprobación)} \\
+\frac{PC}{100} - 0.30 = 0.30 \cdot \frac{PC - 30}{60 - 30} & \text{si } 30 < PC < 60 \text{ (interpolación lineal continua)}
+\end{cases}$$
+
+* **Despeje Algebraico por Bisección:** Para calcular la nota uniforme requerida $X_{\text{global}}$ en certámenes pendientes para aprobar el ramo ($NF \ge 55$), el motor evalúa la función continua monótona no-decreciente $f(X) = NF(X) - 55 = 0$ mediante búsqueda dicotómica en el intervalo $[0, 300]$, garantizando convergencia numérica exacta ($<10^{-4}$).
+
+---
+
+### 4.6 Bonificaciones por Actividades Externas y Multiplicadores de Nota Final
+Se modelan formalmente las distintas vías mediante las cuales los docentes otorgan puntajes complementarios o factores multiplicativos:
+
+1. **Puntos Extra a Certamen / Evaluación Individual (`evalBonusPoints`):**
+   Puntos sumados a un certamen específico (por ejemplo, $+10$ puntos por resolver desafíos adicionales). Si el bloque contiene $N_{\text{usadas}}$ evaluaciones computadas (descontando peores notas si aplica), aporta al promedio del bloque:
+   $$\Delta \overline{PC} = \frac{\text{evalBonusPoints}}{N_{\text{usadas}}}$$
+
+2. **Puntos Extra al Promedio del Bloque (`bonusPoints`):**
+   Puntos sumados directamente a la media de certámenes, controles o tareas (escala $0$ a $100$):
+   $$\overline{B}_{\text{efectivo}} = \min(100, \overline{B}_{\text{base}} + \text{bonusPoints} + \Delta \overline{B}_{\text{eval}})$$
+
+3. **Puntos Extra directos a la Nota Final (`finalGradeBonusPoints`):**
+   Puntos que se añaden directamente al promedio general de presentación por asistencia a seminarios, charlas o hackathons sansanas (ej. $+2$ o $+5$ pts).
+
+4. **Multiplicador sobre la Nota Final (`finalGradeMultiplier`):**
+   Factor de escala porcentual aplicado sobre la nota de presentación previa al examen recuperativo (ej. $\times 1.05$ correspondiente a una bonificación del $+5\%$):
+   $$NF = \min\left(100, \max\left(0, \left(\sum_{i=1}^B w_i \cdot \overline{B}_i\right) \times \text{Multiplier} + \text{BonusNF}\right)\right)$$
+
+> [!TIP]
+> Cualquier bonificación o multiplicador registrado se descuenta en tiempo real de la exigencia de las evaluaciones pendientes, reduciendo la nota requerida en certámenes futuros para aprobar.
+
+---
+
+### 4.7 Modalidades Reglamentarias de Certamen Global y Examen Recuperativo USM
+[`subFormulaSolver.ts`](file:///c:/Users/jjjj/Documents/Malla-USM/src/wolfram-solver/engine/subFormulaSolver.ts) incorpora el cálculo exacto para las tres modalidades oficiales de la USM:
+
+1. **Modalidad Depto. Matemática (`mat_70_30` - MAT-021 a MAT-024):**
+   $$NF = 0.70 \cdot NP + 0.30 \cdot E$$
+   * **Requisito de Derecho:** Nota de presentación $45 \le NP < 55$.
+   * Nota requerida en el Examen Global: $E_{\text{req}} = \frac{55 - 0.70 \cdot NP}{0.30}$.
+2. **Modalidad Depto. Física (`fis_60_40` - FIS-100 a FIS-140):**
+   $$NF = 0.60 \cdot PS + 0.40 \cdot CG$$
+   * **Requisito de Derecho:** Promedio semestral $PS \ge 50$ y nota de certamen global $CG \ge 50$.
+   * Nota requerida en el Certamen Global: $CG_{\text{req}} = \max\left(50, \frac{55 - 0.60 \cdot PS}{0.40}\right)$.
+3. **Modalidad Reemplazo de Peor Certamen (`replace_worst` - Informática y General):**
+   El examen recuperativo sustituye la calificación más baja del bloque principal de certámenes, recalculando la nota final con la nueva ponderación.
+
+---
+
 ## 5. Historial de Versiones (Changelog)
 
 ### v1.0.0 — MVP Inicial
@@ -274,6 +338,42 @@ $$\text{NF} = \begin{cases}
 * **Persistencia y Respaldo:**
   * Almacenamiento local mediante Zustand + `localStorage`.
   * Importación/Exportación en formato JSON.
+
+---
+
+### v1.3.0 — Extractor Oficial SIGA PDF, Fórmulas por Tramos $\alpha(PC)$, Bonificaciones y Simulador Global
+* **Extractor Multi-Patrón de PDFs Oficiales de SIGA (`scripts/extract-siga-formulas.mjs`):**
+  * Extracción y normalización de programas de estudio directamente desde los servidores de SIGA USM (`siga.usm.cl/prog_oai/`).
+  * Parser de la tabla SCT de dedicación horaria (página 3 del programa oficial) que infiere ponderaciones en asignaturas sin fórmula textual explícita.
+  * Detección de ecuaciones insertadas como imágenes LaTeX rasterizadas en los PDFs.
+* **Catálogo de 36 Asignaturas Verificadas (`formulaPresets.ts`):**
+  * Mapeo de fórmulas oficiales con enlaces directos a sus PDFs en SIGA USM para el plan de Informática y asignaturas de ciencias básicas.
+  * Auto-actualización de asignaturas inscritas con plantillas preliminares preservando notas ingresadas.
+* **Motor Algebraico para Funciones por Tramos $\alpha(PC)$:**
+  * Resolución por bisección analítica continua para despeje de incógnitas en asignaturas con pesos dinámicos como `INF-245` y `INF-256`.
+  * Visualización en vivo del chip con el valor de $\alpha(PC)$ y la distribución porcentual resultante.
+* **Módulo de Bonificaciones por Actividades Externas y Multiplicadores de Nota Final:**
+  * Soporte interactivo para puntos extra a evaluaciones individuales (`+Eval`), puntos al promedio de bloque (`+Prom`), puntos directos a la nota final (`+NF`) y factor multiplicador de presentación ($\times\text{Factor}$).
+* **Simulador de Certamen Global y Examen Recuperativo USM:**
+  * Selector de modalidad reglamentaria USM (Matemática 70/30, Física 60/40 y Reemplazo de peor certamen).
+  * Simulación interactiva de escenarios post-global y cálculo automático de nota mínima necesaria.
+
+---
+
+### v1.2.0 — Catálogo Multi-Carrera SIGA, Planificador de Horarios con Reseñas Docentes y Exportación `.ics`
+* **Soporte Multi-Carrera y Catálogo Completo USM:**
+  * Conexión con `planes_carreras.json` para dar soporte a todas las carreras, jornadas y sedes de la universidad (Casa Central, San Joaquín, Viña del Mar, Concepción).
+  * Selector de plan activo en la barra superior y persistencia del identificador de carrera en respaldos JSON.
+* **Grafo de Prerrequisitos Disyuntivos (`OR`), Equivalencias y Aprobación Rápida:**
+  * Evaluación de cláusulas disyuntivas (`requisitos_dnf`) y convalidaciones directas (`equivalencias_dnf`) en [`graphUnlock.ts`](file:///c:/Users/jjjj/Documents/Malla-USM/src/curricula/prerequisites/graphUnlock.ts).
+  * Botón rápido de aprobación masiva por semestre (`✓✓`) en [`SemesterColumn.tsx`](file:///c:/Users/jjjj/Documents/Malla-USM/src/frontend/components/curriculum/SemesterColumn.tsx).
+* **Planificador de Horarios Semanales Interactivo:**
+  * Grilla horaria sansana de Bloques 1 a 16 (8:00 a 21:00 hrs) y días Lunes a Sábado.
+  * Selección de paralelos con detección automática de topes de horario, salas y campus.
+  * Botón **Exportar `.ics`** para importar el horario completo en Google Calendar, Apple Calendar y Outlook.
+* **Ficha de Reseñas de Profesores USM (`professors_view.json`):**
+  * Modal con análisis psicopedagógico de 7 métricas docentes (claridad, coherencia evaluativa, rigor, etc.).
+  * Detección de opiniones bimodales/polarizadas, etiquetas más frecuentes y comentarios de alumnos.
 
 ---
 
