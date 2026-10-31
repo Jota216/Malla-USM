@@ -741,7 +741,7 @@ export function solveSubFormulaCourse(
         const failed = blockResults.find(
           (b) => b.minGradeRequired !== null && (b.currentAverage ?? 0) < b.minGradeRequired
         );
-        diagnosticMessage = `Reprobado por requisito de aprobación: ${failed?.blockName} (${failed?.blockCode}) promedió ${failed?.currentAverage ?? 0} (mínimo exigido: ${failed?.minGradeRequired}). Nota final: ${currentFinalGrade}.`;
+        diagnosticMessage = `Reprobado por regla de penalización USM y requisito de aprobación: ${failed?.blockName} (${failed?.blockCode}) promedió ${failed?.currentAverage ?? 0} (mínimo exigido: ${failed?.minGradeRequired}). Nota final penalizada: ${currentFinalGrade}.`;
       } else {
         diagnosticMessage = `Reprobado. Nota final: ${currentFinalGrade} (mínimo de aprobación: ${passingGrade}).`;
       }

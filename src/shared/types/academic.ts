@@ -353,3 +353,11 @@ export interface AcademicStatistics {
   inProgressCoursesCount: number;
   totalCoursesCount: number;
 }
+
+export type PlannerViewMode = 'official' | 'planned';
+
+export interface MoveCourseResult {
+  success: boolean;
+  reason?: string;
+  pushedCourses?: string[];
+}

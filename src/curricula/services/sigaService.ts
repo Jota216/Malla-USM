@@ -494,9 +494,13 @@ class SigaService {
     approvedCourses: Record<string, ApprovedCourseRecord>;
     inProgressCourses: Record<string, EnrolledCourseConfig>;
     milestones: GraduationMilestone[];
+    plannerMode?: 'official' | 'planned';
+    plannedSemesterOverrides?: Record<string, number>;
+    maxCreditsPerSemester?: number;
+    customMaxSemester?: number;
   }): string {
     const backupData = {
-      version: '1.2.0',
+      version: '1.3.0',
       exportedAt: new Date().toISOString(),
       system: 'Sansano Academic Tracker - USM',
       data: payload,
@@ -511,6 +515,10 @@ class SigaService {
       approvedCourses: Record<string, ApprovedCourseRecord>;
       inProgressCourses: Record<string, EnrolledCourseConfig>;
       milestones: GraduationMilestone[];
+      plannerMode?: 'official' | 'planned';
+      plannedSemesterOverrides?: Record<string, number>;
+      maxCreditsPerSemester?: number;
+      customMaxSemester?: number;
     };
     error?: string;
   } {
@@ -532,6 +540,15 @@ class SigaService {
           approvedCourses: data.approvedCourses || {},
           inProgressCourses: data.inProgressCourses || {},
           milestones: Array.isArray(data.milestones) ? data.milestones : [],
+          plannerMode: data.plannerMode === 'planned' ? 'planned' : 'official',
+          plannedSemesterOverrides:
+            data.plannedSemesterOverrides && typeof data.plannedSemesterOverrides === 'object'
+              ? data.plannedSemesterOverrides
+              : {},
+          maxCreditsPerSemester:
+            typeof data.maxCreditsPerSemester === 'number' ? data.maxCreditsPerSemester : 30,
+          customMaxSemester:
+            typeof data.customMaxSemester === 'number' ? data.customMaxSemester : undefined,
         },
       };
     } catch (e) {

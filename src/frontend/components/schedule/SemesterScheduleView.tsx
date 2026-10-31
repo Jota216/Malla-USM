@@ -42,8 +42,17 @@ import {
   GraduationCap,
   Search,
   Eye,
+  EyeOff,
   Download,
+  Sparkles,
+  Check,
+  ChevronUp,
 } from "lucide-react";
+import {
+  optimizeSchedule,
+  ScheduleOptimizationResult,
+  ScheduleOptimizationStrategy,
+} from "./scheduleOptimizer";
 
 interface ScheduledCellEntry {
   sigla: string;
@@ -114,6 +123,25 @@ export function SemesterScheduleView() {
     sigla: string;
     parallel: CourseParallel;
   } | null>(null);
+
+  // Multi-criteria Schedule Optimizer State
+  const [optimizerStrategy, setOptimizerStrategy] =
+    React.useState<ScheduleOptimizationStrategy>("minimize_clashes");
+  const [optimizationResults, setOptimizationResults] = React.useState<
+    ScheduleOptimizationResult[]
+  >([]);
+  const [isOptimizing, setIsOptimizing] = React.useState<boolean>(false);
+  const [showOptimizerPanel, setShowOptimizerPanel] =
+    React.useState<boolean>(false);
+  const [previewCombo, setPreviewCombo] =
+    React.useState<ScheduleOptimizationResult | null>(null);
+  const [hoveredCombo, setHoveredCombo] =
+    React.useState<ScheduleOptimizationResult | null>(null);
+  const [appliedComboId, setAppliedComboId] = React.useState<string | null>(
+    null
+  );
+
+  const activeComboPreview = hoveredCombo || previewCombo;
 
   // Sync default sede/jornada when curriculum changes
   React.useEffect(() => {
@@ -302,14 +330,20 @@ export function SemesterScheduleView() {
     const activeDaysSet = new Set<number>();
     let assignedCount = 0;
 
+    const previewParallels = activeComboPreview?.parallels;
+
     enrolledSiglas.forEach((sigla, idx) => {
       const config = inProgressCourses[sigla];
-      const parId = config?.selectedParallel;
-      if (!parId) return;
+      const isCandidatePreview = Boolean(previewParallels && previewParallels[sigla]);
 
-      const parList = parallelsByCourse[sigla] || [];
-      const chosenPar = parList.find((p) => p.paralelo === parId);
+      const chosenPar = isCandidatePreview
+        ? previewParallels![sigla]
+        : (parallelsByCourse[sigla] || []).find(
+            (p) => p.paralelo === config?.selectedParallel
+          );
+
       if (!chosenPar || !chosenPar.horario) return;
+      const parId = chosenPar.paralelo;
 
       assignedCount++;
       const courseObj = curriculum.ramos.find((r) => r.sigla === sigla);
@@ -323,6 +357,10 @@ export function SemesterScheduleView() {
         uniqueDayBlockSet.add(`${b.dia}-${b.bloque}`);
         activeDaysSet.add(b.dia);
       }
+
+      const isDiffFromCurrent = Boolean(
+        isCandidatePreview && config?.selectedParallel !== parId
+      );
 
       for (const pairObj of USM_BLOCK_PAIRS) {
         for (let dia = 0; dia < 6; dia++) {
@@ -342,8 +380,8 @@ export function SemesterScheduleView() {
                 sala: matchingBlock.sala,
                 profesor:
                   chosenPar.profesor?.join(", ") || matchingBlock.profesor,
-                color: areaColor,
-                isPreview: false,
+                color: isDiffFromCurrent ? "#D99B00" : areaColor,
+                isPreview: isDiffFromCurrent,
               });
             }
           }
@@ -396,13 +434,15 @@ export function SemesterScheduleView() {
     }> = [];
 
     for (const [key, entries] of Object.entries(map)) {
-      const nonPreviewEntries = entries.filter((e) => !e.isPreview);
-      if (nonPreviewEntries.length > 1) {
+      const targetEntries = activeComboPreview
+        ? entries
+        : entries.filter((e) => !e.isPreview);
+      if (targetEntries.length > 1) {
         const [diaStr, ...pairParts] = key.split("-");
         conflictList.push({
           dia: Number(diaStr),
           pair: pairParts.join("-"),
-          entries: nonPreviewEntries,
+          entries: targetEntries,
         });
       }
     }
@@ -421,30 +461,88 @@ export function SemesterScheduleView() {
     parallelsByCourse,
     curriculum,
     hoveredPreview,
+    activeComboPreview,
   ]);
 
-  // Auto-select conflict-free parallels for enrolled courses
-  const handleAutoAssignParallels = () => {
-    const occupied = new Set<string>();
+  // Reset optimization preview when enrolled courses change
+  React.useEffect(() => {
+    setPreviewCombo(null);
+    setHoveredCombo(null);
+    setOptimizationResults([]);
+    setAppliedComboId(null);
+  }, [enrolledSiglas.length]);
 
-    for (const sigla of enrolledSiglas) {
-      const parList = parallelsByCourse[sigla] || [];
-      if (parList.length === 0) continue;
+  // Run multi-criteria schedule optimizer
+  const handleRunOptimizer = React.useCallback(
+    (customStrategy?: ScheduleOptimizationStrategy) => {
+      const strat = customStrategy || optimizerStrategy;
+      setIsOptimizing(true);
+      setShowOptimizerPanel(true);
 
-      let bestPar = parList[0];
-      for (const candidate of parList) {
-        const hasCollision = (candidate.horario || []).some((b) =>
-          occupied.has(`${b.dia}-${b.bloque}`)
-        );
-        if (!hasCollision) {
-          bestPar = candidate;
-          break;
+      setTimeout(() => {
+        try {
+          const results = optimizeSchedule({
+            courses: enrolledSiglas,
+            parallelsByCourse,
+            strategy: strat,
+            maxResults: 3,
+          });
+          setOptimizationResults(results);
+          if (results.length > 0) {
+            setAppliedComboId(null);
+          }
+        } finally {
+          setIsOptimizing(false);
         }
-      }
+      }, 10);
+    },
+    [enrolledSiglas, parallelsByCourse, optimizerStrategy]
+  );
 
-      setSelectedParallel(sigla, bestPar.paralelo);
-      for (const b of bestPar.horario || []) {
-        occupied.add(`${b.dia}-${b.bloque}`);
+  // Apply a suggested combination of parallels
+  const handleApplyCombination = React.useCallback(
+    (combo: ScheduleOptimizationResult) => {
+      Object.entries(combo.parallels).forEach(([sigla, par]) => {
+        setSelectedParallel(sigla, par.paralelo);
+      });
+      setPreviewCombo(null);
+      setHoveredCombo(null);
+      setAppliedComboId(combo.id);
+    },
+    [setSelectedParallel]
+  );
+
+  // Auto-select conflict-free parallels for enrolled courses (upgraded with multi-criteria optimizer)
+  const handleAutoAssignParallels = () => {
+    const results = optimizeSchedule({
+      courses: enrolledSiglas,
+      parallelsByCourse,
+      strategy: "minimize_clashes",
+      maxResults: 1,
+    });
+    if (results.length > 0) {
+      handleApplyCombination(results[0]);
+    } else {
+      const occupied = new Set<string>();
+      for (const sigla of enrolledSiglas) {
+        const parList = parallelsByCourse[sigla] || [];
+        if (parList.length === 0) continue;
+
+        let bestPar = parList[0];
+        for (const candidate of parList) {
+          const hasCollision = (candidate.horario || []).some((b) =>
+            occupied.has(`${b.dia}-${b.bloque}`)
+          );
+          if (!hasCollision) {
+            bestPar = candidate;
+            break;
+          }
+        }
+
+        setSelectedParallel(sigla, bestPar.paralelo);
+        for (const b of bestPar.horario || []) {
+          occupied.add(`${b.dia}-${b.bloque}`);
+        }
       }
     }
   };
@@ -601,14 +699,31 @@ export function SemesterScheduleView() {
                 <>
                   <Button
                     type="button"
-                    variant="gold"
+                    variant={showOptimizerPanel ? "usm" : "gold"}
+                    size="sm"
+                    onClick={() => {
+                      setShowOptimizerPanel((prev) => !prev);
+                      if (!showOptimizerPanel || optimizationResults.length === 0) {
+                        handleRunOptimizer(optimizerStrategy);
+                      }
+                    }}
+                    className="h-8 gap-1.5 text-xs font-semibold shadow-xs"
+                    title="Abrir panel de optimización multi-criterio de horarios"
+                  >
+                    <Sparkles className="h-3.5 w-3.5 text-[#D99B00]" />
+                    <span>Auto-Optimizar Horario</span>
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant="outline"
                     size="sm"
                     onClick={handleAutoAssignParallels}
                     className="h-8 gap-1.5 text-xs"
-                    title="Buscar combinación de paralelos sin topes de horario"
+                    title="Asignar automáticamente la mejor combinación sin topes en 1 clic"
                   >
                     <Wand2 className="h-3.5 w-3.5" />
-                    <span>Auto-asignar sin Topes</span>
+                    <span>Auto-asignar 1-Clic</span>
                   </Button>
 
                   {assignedCoursesCount > 0 && (
@@ -795,6 +910,329 @@ export function SemesterScheduleView() {
           )}
         </CardContent>
       </Card>
+
+      {/* Auto-Optimizar Horario Multi-Criterio Panel */}
+      {showOptimizerPanel && enrolledSiglas.length > 0 && (
+        <Card className="border-2 border-[#D99B00]/40 bg-card shadow-md transition-all animate-in fade-in slide-in-from-top-2">
+          <CardHeader className="p-4 pb-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <CardTitle className="text-base sm:text-lg flex items-center gap-2 text-foreground">
+                  <Sparkles className="h-5 w-5 text-[#D99B00]" />
+                  <span>Auto-Optimizador de Horario Multi-Criterio</span>
+                </CardTitle>
+                <CardDescription className="text-xs mt-0.5">
+                  Evalúa combinaciones de paralelos en paralelo para eliminar choques, reducir bloques ventana y maximizar días libres.
+                </CardDescription>
+              </div>
+
+              <div className="flex items-center gap-2 self-start sm:self-auto">
+                <Button
+                  type="button"
+                  variant="gold"
+                  size="sm"
+                  onClick={() => handleRunOptimizer(optimizerStrategy)}
+                  disabled={isOptimizing}
+                  className="h-8 text-xs font-semibold gap-1.5 shadow-xs"
+                >
+                  {isOptimizing ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Wand2 className="h-3.5 w-3.5" />
+                  )}
+                  <span>{isOptimizing ? "Optimizando..." : "Sugerir Mejor Horario"}</span>
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => {
+                    setShowOptimizerPanel(false);
+                    setPreviewCombo(null);
+                    setHoveredCombo(null);
+                  }}
+                  className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                  title="Cerrar panel de optimización"
+                >
+                  <ChevronUp className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+
+          <CardContent className="p-4 pt-2 space-y-4">
+            {/* Strategy Selector */}
+            <div className="space-y-1.5">
+              <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <span>Estrategia de Optimización:</span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOptimizerStrategy("minimize_clashes");
+                    handleRunOptimizer("minimize_clashes");
+                  }}
+                  className={`p-2.5 rounded-lg border text-left transition-all flex flex-col justify-between ${
+                    optimizerStrategy === "minimize_clashes"
+                      ? "border-[#002B49] bg-[#002B49]/10 dark:border-[#D99B00] dark:bg-[#D99B00]/15 ring-2 ring-[#002B49]/40 dark:ring-[#D99B00]/40 shadow-xs"
+                      : "border-border hover:border-muted-foreground/40 bg-card/60"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="font-bold text-xs flex items-center gap-1.5 text-foreground">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                      Minimizar Topes
+                    </span>
+                    {optimizerStrategy === "minimize_clashes" && (
+                      <Badge variant="default" className="text-[9px] py-0 px-1">
+                        Activa
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
+                    Prioriza 0 choques de horario primero, luego reduce ventanas y busca días libres.
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOptimizerStrategy("minimize_windows");
+                    handleRunOptimizer("minimize_windows");
+                  }}
+                  className={`p-2.5 rounded-lg border text-left transition-all flex flex-col justify-between ${
+                    optimizerStrategy === "minimize_windows"
+                      ? "border-[#002B49] bg-[#002B49]/10 dark:border-[#D99B00] dark:bg-[#D99B00]/15 ring-2 ring-[#002B49]/40 dark:ring-[#D99B00]/40 shadow-xs"
+                      : "border-border hover:border-muted-foreground/40 bg-card/60"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="font-bold text-xs flex items-center gap-1.5 text-foreground">
+                      <Clock className="h-3.5 w-3.5 text-amber-500" />
+                      Minimizar Ventanas
+                    </span>
+                    {optimizerStrategy === "minimize_windows" && (
+                      <Badge variant="default" className="text-[9px] py-0 px-1">
+                        Activa
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
+                    Minimiza horas muertas entre clases para compactar los bloques del día continuo.
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOptimizerStrategy("maximize_free_time");
+                    handleRunOptimizer("maximize_free_time");
+                  }}
+                  className={`p-2.5 rounded-lg border text-left transition-all flex flex-col justify-between ${
+                    optimizerStrategy === "maximize_free_time"
+                      ? "border-[#002B49] bg-[#002B49]/10 dark:border-[#D99B00] dark:bg-[#D99B00]/15 ring-2 ring-[#002B49]/40 dark:ring-[#D99B00]/40 shadow-xs"
+                      : "border-border hover:border-muted-foreground/40 bg-card/60"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="font-bold text-xs flex items-center gap-1.5 text-foreground">
+                      <Calendar className="h-3.5 w-3.5 text-sky-500" />
+                      Maximizar Tiempo Libre
+                    </span>
+                    {optimizerStrategy === "maximize_free_time" && (
+                      <Badge variant="default" className="text-[9px] py-0 px-1">
+                        Activa
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-1 leading-snug">
+                    Agrupa clases para liberar días completos y medios días (mañanas o tardes libres).
+                  </p>
+                </button>
+              </div>
+            </div>
+
+            {/* Top 3 Combinations Results */}
+            {isOptimizing ? (
+              <div className="p-8 text-center space-y-2 border rounded-lg bg-muted/10">
+                <Loader2 className="h-6 w-6 animate-spin mx-auto text-[#D99B00]" />
+                <div className="text-xs font-semibold text-foreground">
+                  Evaluando miles de combinaciones de paralelos en paralelo...
+                </div>
+                <div className="text-[11px] text-muted-foreground">
+                  Calculando topes, ventanas y días libres garantizando respuesta en &lt; 50ms
+                </div>
+              </div>
+            ) : optimizationResults.length === 0 ? (
+              <div className="p-4 rounded-lg border border-dashed text-center text-xs text-muted-foreground">
+                Haz clic en <strong>"Sugerir Mejor Horario"</strong> para calcular el Top 3 de combinaciones óptimas para tus {enrolledSiglas.length} asignaturas inscritas.
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between flex-wrap gap-1">
+                  <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <Sparkles className="h-3.5 w-3.5 text-[#D99B00]" />
+                    <span>Top {optimizationResults.length} de Mejores Combinaciones Encontradas:</span>
+                  </div>
+                  <span className="text-[11px] text-muted-foreground">
+                    Pasa el cursor sobre una opción para previsualizarla en la grilla
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {optimizationResults.map((result) => {
+                    const isPreviewed = activeComboPreview?.id === result.id;
+                    const isApplied = appliedComboId === result.id;
+
+                    return (
+                      <div
+                        key={result.id}
+                        onMouseEnter={() => setHoveredCombo(result)}
+                        onMouseLeave={() => setHoveredCombo(null)}
+                        className={`rounded-lg border p-3 flex flex-col justify-between gap-2.5 transition-all relative ${
+                          isPreviewed
+                            ? "border-[#D99B00] ring-2 ring-[#D99B00]/40 bg-[#D99B00]/5 shadow-sm"
+                            : isApplied
+                            ? "border-emerald-500/50 bg-emerald-500/5"
+                            : "border-border hover:border-muted-foreground/50 bg-card"
+                        }`}
+                      >
+                        {/* Header of Option */}
+                        <div>
+                          <div className="flex items-center justify-between gap-1 mb-1.5">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-bold text-xs text-foreground">
+                                Opción {result.rank}
+                              </span>
+                              {result.rank === 1 && (
+                                <Badge variant="usm" className="text-[9px] px-1 py-0 font-semibold">
+                                  Recomendada
+                                </Badge>
+                              )}
+                            </div>
+                            <span className="text-[10px] font-mono font-bold text-muted-foreground">
+                              Score: {result.score}/100
+                            </span>
+                          </div>
+
+                          {/* Summary Badges: Topes, Ventanas, Dias Libres */}
+                          <div className="flex flex-wrap gap-1 mb-2">
+                            {result.clashCount === 0 ? (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 flex items-center gap-0.5">
+                                <CheckCircle2 className="h-2.5 w-2.5" />
+                                0 Topes
+                              </span>
+                            ) : (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-destructive/15 text-destructive border border-destructive/30 flex items-center gap-0.5">
+                                <AlertTriangle className="h-2.5 w-2.5" />
+                                {result.clashCount} Tope{result.clashCount > 1 ? "s" : ""}
+                              </span>
+                            )}
+
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 flex items-center gap-0.5">
+                              <Clock className="h-2.5 w-2.5" />
+                              {result.windowBlocks === 0
+                                ? "0 Ventanas"
+                                : `${result.windowBlocks} Ventana${result.windowBlocks > 1 ? "s" : ""}`}
+                            </span>
+
+                            {result.freeDays > 0 && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/30 flex items-center gap-0.5">
+                                <Calendar className="h-2.5 w-2.5" />
+                                {result.freeDays} Día{result.freeDays > 1 ? "s" : ""} libre{result.freeDays > 1 ? "s" : ""}
+                              </span>
+                            )}
+
+                            {result.freeDays === 0 && result.freeHalfDays > 0 && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30">
+                                {result.freeHalfDays} Medios días libres
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Parallels Pill List */}
+                          <div className="space-y-1 bg-muted/30 p-2 rounded border border-border/50 text-[11px]">
+                            <div className="text-[10px] font-semibold text-muted-foreground uppercase">
+                              Paralelos Asignados:
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                              {Object.entries(result.parallels).map(([sigla, par]) => (
+                                <span
+                                  key={sigla}
+                                  className="px-1.5 py-0.5 rounded bg-background text-[10px] font-mono border inline-flex items-center gap-1"
+                                  title={`${sigla}: Paralelo ${par.paralelo} (${par.profesor?.join(", ") || "Profesor por definir"})`}
+                                >
+                                  <strong>{sigla}</strong>
+                                  <span className="text-[#002B49] dark:text-[#D99B00] font-bold">
+                                    P{par.paralelo}
+                                  </span>
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex items-center gap-1.5 pt-1">
+                          <Button
+                            type="button"
+                            variant={isPreviewed ? "secondary" : "outline"}
+                            size="sm"
+                            onClick={() => {
+                              if (previewCombo?.id === result.id) {
+                                setPreviewCombo(null);
+                              } else {
+                                setPreviewCombo(result);
+                              }
+                            }}
+                            className="h-7 text-[11px] gap-1 flex-1"
+                            title="Previsualizar esta combinación en la grilla horaria"
+                          >
+                            {isPreviewed ? (
+                              <>
+                                <EyeOff className="h-3 w-3" />
+                                <span>Ocultar</span>
+                              </>
+                            ) : (
+                              <>
+                                <Eye className="h-3 w-3" />
+                                <span>Ver Grilla</span>
+                              </>
+                            )}
+                          </Button>
+
+                          <Button
+                            type="button"
+                            variant={isApplied ? "outline" : "gold"}
+                            size="sm"
+                            onClick={() => handleApplyCombination(result)}
+                            className="h-7 text-[11px] font-semibold gap-1 flex-1 shadow-2xs"
+                          >
+                            {isApplied ? (
+                              <>
+                                <Check className="h-3 w-3 text-emerald-500" />
+                                <span>Aplicada</span>
+                              </>
+                            ) : (
+                              <>
+                                <Check className="h-3 w-3" />
+                                <span>Aplicar</span>
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Main Layout: Professor/Parallel Picker + Weekly Calendar Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
@@ -1008,7 +1446,47 @@ export function SemesterScheduleView() {
         </div>
 
         {/* Right Column: Weekly Schedule Grid */}
-        <div className="lg:col-span-8">
+        <div className="lg:col-span-8 space-y-2.5">
+          {activeComboPreview && (
+            <div className="p-2.5 rounded-lg border border-[#D99B00]/40 bg-[#D99B00]/10 flex flex-wrap items-center justify-between gap-2 text-xs animate-in fade-in">
+              <div className="flex items-center gap-2">
+                <Eye className="h-4 w-4 text-[#D99B00] shrink-0" />
+                <div>
+                  <span className="font-bold text-[#002B49] dark:text-[#D99B00]">
+                    Previsualizando Opción {activeComboPreview.rank}
+                  </span>
+                  <span className="text-muted-foreground ml-1.5 hidden sm:inline">
+                    ({activeComboPreview.summaryBadges.join(" • ")})
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="gold"
+                  onClick={() => handleApplyCombination(activeComboPreview)}
+                  className="h-7 text-xs font-semibold gap-1"
+                >
+                  <Check className="h-3 w-3" />
+                  <span>Aplicar esta combinación</span>
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setPreviewCombo(null);
+                    setHoveredCombo(null);
+                  }}
+                  className="h-7 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <span>Cerrar</span>
+                </Button>
+              </div>
+            </div>
+          )}
+
           <Card className="overflow-hidden">
             <CardContent className="p-0 overflow-x-auto">
               <table className="w-full border-collapse text-xs min-w-[640px]">

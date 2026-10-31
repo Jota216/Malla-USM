@@ -1,13 +1,13 @@
 {
   "name": "usm-malla-grade-solver",
-  "version": "1.1.0",
+  "version": "1.4.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "sync:data": "node scripts/sync-upstream-data.mjs",
-    "test": "npx tsx src/wolfram-solver/tests/subFormulaSolver.test.ts && npx tsx src/wolfram-solver/tests/gradeSolver.test.ts && npx tsx src/shared/tests/qaIntegration.test.ts"
+    "test": "npx tsx src/wolfram-solver/tests/subFormulaSolver.test.ts && npx tsx src/wolfram-solver/tests/gradeSolver.test.ts && npx tsx src/shared/tests/qaIntegration.test.ts && npx tsx src/frontend/components/schedule/tests/scheduleOptimizer.test.ts && npx tsx src/curricula/tests/criticalPathPlanner.test.ts"
   },
   "dependencies": {
     "react": "^18.3.1",

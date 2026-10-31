@@ -131,7 +131,7 @@ export function Navbar({ activeTab, onTabChange }: NavbarProps) {
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-black text-lg sm:text-xl tracking-tight text-[#002B49] dark:text-slate-100">
-                  Sansano<span className="text-[#D99B00]">Tracker</span>
+                  Meta<span className="text-[#D99B00]">55</span>
                 </span>
                 <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-[#002B49]/10 dark:bg-slate-800 text-[#002B49] dark:text-[#D99B00]">
                   USM

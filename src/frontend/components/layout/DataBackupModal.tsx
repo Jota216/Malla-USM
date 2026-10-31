@@ -94,7 +94,7 @@ export function DataBackupModal({ open, onOpenChange }: DataBackupModalProps) {
       } else {
         setImportStatus({
           type: "error",
-          message: "El formato del JSON es inválido o no compatible con USM Tracker.",
+          message: "El formato del JSON es inválido o no compatible con Meta55.",
         });
       }
     } catch (err: unknown) {

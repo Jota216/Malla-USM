@@ -1,7 +1,8 @@
 import { Course, CourseStatusDetail } from "@/shared/types/academic";
+import { CriticalPathMetric } from "@/curricula/planner/criticalPathPlanner";
 import { CourseCard } from "./CourseCard";
 import { Progress } from "@/frontend/components/ui/progress";
-import { CheckCheck } from "lucide-react";
+import { CheckCheck, AlertTriangle, Calendar } from "lucide-react";
 
 interface SemesterColumnProps {
   semesterNumber: number;
@@ -11,6 +12,11 @@ interface SemesterColumnProps {
   onOpenDetail: (course: Course) => void;
   onNavigateToSolver?: (sigla: string) => void;
   onToggleSemesterApproval?: (semesterNumber: number) => void;
+  isPlannedMode?: boolean;
+  maxCreditsSct?: number;
+  criticalMetrics?: Map<string, CriticalPathMetric>;
+  totalPlannedSemesters?: number;
+  onMoveCourse?: (sigla: string, targetSemester: number, cascadePush?: boolean) => void;
 }
 
 const ROMAN_NUMERALS = [
@@ -27,6 +33,14 @@ const ROMAN_NUMERALS = [
   "X",
   "XI",
   "XII",
+  "XIII",
+  "XIV",
+  "XV",
+  "XVI",
+  "XVII",
+  "XVIII",
+  "XIX",
+  "XX",
 ];
 
 export function SemesterColumn({
@@ -37,6 +51,11 @@ export function SemesterColumn({
   onOpenDetail,
   onNavigateToSolver,
   onToggleSemesterApproval,
+  isPlannedMode = false,
+  maxCreditsSct = 30,
+  criticalMetrics,
+  totalPlannedSemesters = 11,
+  onMoveCourse,
 }: SemesterColumnProps) {
   const roman = ROMAN_NUMERALS[semesterNumber] || `${semesterNumber}`;
 
@@ -51,9 +70,16 @@ export function SemesterColumn({
 
   const percent = totalCourses > 0 ? (approvedCount / totalCourses) * 100 : 0;
   const isComplete = totalCourses > 0 && approvedCount === totalCourses;
+  const isOverCreditLimit = isPlannedMode && totalSct > maxCreditsSct;
 
   return (
-    <div className="flex flex-col w-[210px] shrink-0 bg-slate-50/70 dark:bg-slate-900/40 rounded-xl p-2.5 border border-border/80 shadow-2xs">
+    <div
+      className={`flex flex-col w-[215px] shrink-0 rounded-xl p-2.5 border shadow-2xs transition-colors ${
+        isOverCreditLimit
+          ? "bg-amber-50/70 dark:bg-amber-950/20 border-amber-300 dark:border-amber-800"
+          : "bg-slate-50/70 dark:bg-slate-900/40 border-border/80"
+      }`}
+    >
       {/* Column Header */}
       <div className="pb-2 mb-2 border-b">
         <div className="flex items-center justify-between gap-1">
@@ -62,6 +88,8 @@ export function SemesterColumn({
               className={`inline-flex items-center justify-center h-5 w-5 rounded font-black text-[11px] ${
                 isComplete
                   ? "bg-emerald-600 text-white"
+                  : isPlannedMode
+                  ? "bg-[#D99B00] text-[#002B49]"
                   : "bg-[#002B49] text-[#D99B00]"
               }`}
             >
@@ -71,7 +99,7 @@ export function SemesterColumn({
           </h4>
 
           <div className="flex items-center gap-1">
-            {onToggleSemesterApproval && totalCourses > 0 && (
+            {onToggleSemesterApproval && totalCourses > 0 && !isPlannedMode && (
               <button
                 type="button"
                 onClick={() => onToggleSemesterApproval(semesterNumber)}
@@ -94,6 +122,8 @@ export function SemesterColumn({
               className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
                 isComplete
                   ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-400"
+                  : isOverCreditLimit
+                  ? "bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30"
                   : "bg-muted text-muted-foreground"
               }`}
             >
@@ -103,43 +133,69 @@ export function SemesterColumn({
         </div>
 
         {/* Credits subtitle & Progress */}
-        <div className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground font-medium">
-          <span>
+        <div className="mt-1 flex items-center justify-between text-[10px] font-medium">
+          <span
+            className={
+              isOverCreditLimit
+                ? "text-amber-700 dark:text-amber-300 font-bold flex items-center gap-0.5"
+                : "text-muted-foreground"
+            }
+          >
+            {isOverCreditLimit && <AlertTriangle className="h-3 w-3 inline text-amber-500" />}
             {totalSct} SCT | {totalUsm} USM
+            {isPlannedMode && (
+              <span className="text-[9px] opacity-75 font-normal ml-0.5">
+                (máx {maxCreditsSct})
+              </span>
+            )}
           </span>
-          <span>{Math.round(percent)}%</span>
+          <span className="text-muted-foreground">{Math.round(percent)}%</span>
         </div>
         <Progress
           value={percent}
           className="h-1 mt-1 bg-slate-200 dark:bg-slate-800"
-          indicatorClassName={isComplete ? "bg-emerald-600" : "bg-[#D99B00]"}
+          indicatorClassName={isComplete ? "bg-emerald-600" : isPlannedMode ? "bg-[#D99B00]" : "bg-[#002B49]"}
         />
       </div>
 
       {/* Courses List */}
       <div className="flex flex-col space-y-2 flex-1">
-        {courses.map((course) => {
-          const detail = coursesStatus[course.sigla] || {
-            course,
-            status: "AVAILABLE",
-            missingPrerequisites: [],
-          };
-          const area = areas[course.area] || {
-            nombre: course.area,
-            color: "#64748B",
-          };
+        {courses.length === 0 ? (
+          <div className="flex-1 flex flex-col items-center justify-center p-3 text-center border border-dashed border-border/70 rounded-lg my-2 min-h-[90px]">
+            <Calendar className="h-4 w-4 text-muted-foreground/60 mb-1" />
+            <span className="text-[11px] text-muted-foreground italic">
+              {isPlannedMode ? "Semestre sin asignaturas. Puedes mover ramos aquí." : "Sin asignaturas"}
+            </span>
+          </div>
+        ) : (
+          courses.map((course) => {
+            const detail = coursesStatus[course.sigla] || {
+              course,
+              status: "AVAILABLE",
+              missingPrerequisites: [],
+            };
+            const area = areas[course.area] || {
+              nombre: course.area,
+              color: "#64748B",
+            };
 
-          return (
-            <CourseCard
-              key={course.sigla}
-              course={course}
-              statusDetail={detail}
-              areaColor={area.color}
-              onOpenDetail={onOpenDetail}
-              onNavigateToSolver={onNavigateToSolver}
-            />
-          );
-        })}
+            return (
+              <CourseCard
+                key={course.sigla}
+                course={course}
+                statusDetail={detail}
+                areaColor={area.color}
+                onOpenDetail={onOpenDetail}
+                onNavigateToSolver={onNavigateToSolver}
+                isPlannedMode={isPlannedMode}
+                plannedSemester={semesterNumber}
+                criticalMetric={criticalMetrics?.get(course.sigla)}
+                totalPlannedSemesters={totalPlannedSemesters}
+                onMoveCourse={onMoveCourse}
+              />
+            );
+          })
+        )}
       </div>
     </div>
   );

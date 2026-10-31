@@ -21,6 +21,17 @@ import { Card, CardHeader, CardContent } from "@/frontend/components/ui/card";
 import { Badge } from "@/frontend/components/ui/badge";
 import { Button } from "@/frontend/components/ui/button";
 import {
+  AlertDialog,
+  AlertDialogTrigger,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogAction,
+  AlertDialogCancel,
+} from "@/frontend/components/ui/alert-dialog";
+import {
   Trash2,
   Award,
   CheckCircle2,
@@ -100,6 +111,7 @@ export function CourseSolverCard({
   onQuickApprove,
 }: CourseSolverCardProps) {
   const [editorOpen, setEditorOpen] = React.useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = React.useState(false);
   const [showGlobalSim, setShowGlobalSim] = React.useState(false);
   const [examModality, setExamModality] = React.useState<GlobalExamModality>(() =>
     getDefaultModalityForSigla(sigla)
@@ -436,16 +448,44 @@ export function CourseSolverCard({
             </Button>
           )}
 
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => onUnenroll(sigla)}
-            className="h-8 w-8 text-zinc-400 hover:text-rose-400 hover:bg-rose-950/30 rounded-lg transition-colors"
-            title="Desinscribir ramo del semestre"
-            aria-label="Desinscribir asignatura"
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+            <AlertDialogTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-zinc-400 hover:text-rose-400 hover:bg-rose-950/30 rounded-lg transition-colors"
+                title="Desinscribir ramo del semestre"
+                aria-label="Desinscribir asignatura"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  ¿Eliminar {courseInfo?.nombre ? `${sigla} - ${courseInfo.nombre}` : sigla} de tus ramos inscritos?
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  Se perderán las notas parciales y ajustes de fórmula guardados para este semestre.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>
+                  Cancelar
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => {
+                    setDeleteConfirmOpen(false);
+                    onUnenroll(sigla);
+                  }}
+                  className="bg-rose-600 hover:bg-rose-700 text-white gap-2 font-medium"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  <span>Sí, eliminar ramo</span>
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </CardHeader>
 

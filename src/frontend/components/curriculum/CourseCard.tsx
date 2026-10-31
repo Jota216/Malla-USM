@@ -1,5 +1,6 @@
 import * as React from "react";
 import { Course, CourseStatusDetail } from "@/shared/types/academic";
+import { CriticalPathMetric } from "@/curricula/planner/criticalPathPlanner";
 import { useAcademicStore } from "@/shared/store/useAcademicStore";
 import {
   Tooltip,
@@ -24,6 +25,9 @@ import {
   Info,
   BookOpen,
   Award,
+  ArrowLeft,
+  ArrowRight,
+  Calendar,
 } from "lucide-react";
 
 interface CourseCardProps {
@@ -32,6 +36,11 @@ interface CourseCardProps {
   areaColor: string;
   onOpenDetail: (course: Course) => void;
   onNavigateToSolver?: (sigla: string) => void;
+  isPlannedMode?: boolean;
+  plannedSemester?: number;
+  criticalMetric?: CriticalPathMetric;
+  totalPlannedSemesters?: number;
+  onMoveCourse?: (sigla: string, targetSemester: number, cascadePush?: boolean) => void;
 }
 
 export function CourseCard({
@@ -40,6 +49,11 @@ export function CourseCard({
   areaColor,
   onOpenDetail,
   onNavigateToSolver,
+  isPlannedMode = false,
+  plannedSemester,
+  criticalMetric,
+  totalPlannedSemesters = 11,
+  onMoveCourse,
 }: CourseCardProps) {
   const {
     curriculum,
@@ -51,6 +65,7 @@ export function CourseCard({
   const status = statusDetail.status;
   const grade = statusDetail.grade;
   const missingPrereqs = statusDetail.missingPrerequisites;
+  const currentSemester = plannedSemester ?? course.semestre;
 
   // Courses directly unlocked by this one
   const unlocked = React.useMemo(() => {
@@ -58,7 +73,7 @@ export function CourseCard({
   }, [course.sigla, curriculum.ramos]);
 
   const handleCardClick = (e: React.MouseEvent) => {
-    // If click originates from the dropdown trigger or inside dropdown, don't trigger card action
+    // If click originates from the dropdown trigger or inside interactive controls, don't trigger card action
     if ((e.target as HTMLElement).closest("[data-no-card-click]")) {
       return;
     }
@@ -108,10 +123,10 @@ export function CourseCard({
         <TooltipTrigger asChild>
           <div
             onClick={handleCardClick}
-            className={`group relative flex flex-col justify-between rounded-lg p-2.5 transition-all text-xs border border-l-4 select-none min-h-[92px] ${statusCardStyle}`}
+            className={`group relative flex flex-col justify-between rounded-lg p-2.5 transition-all text-xs border border-l-4 select-none min-h-[96px] ${statusCardStyle}`}
             style={{ borderLeftColor: areaColor }}
           >
-            {/* Top Row: Sigla & ID circle & Options dropdown */}
+            {/* Top Row: Sigla & Status Icons & Badges & Options dropdown */}
             <div className="flex items-center justify-between gap-1 w-full">
               <div className="flex items-center gap-1.5 font-mono font-bold tracking-tight text-[11px] sm:text-xs">
                 <span>{course.sigla}</span>
@@ -124,6 +139,28 @@ export function CourseCard({
               </div>
 
               <div className="flex items-center gap-1" data-no-card-click="true">
+                {/* Critical Bottleneck Badges */}
+                {criticalMetric?.isCriticalBottleneck && status !== "APPROVED" && (
+                  <span
+                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-500/40 shadow-2xs"
+                    title={`Prioridad Crítica: L=${criticalMetric.criticalPathLength} semestres. Desbloquea ${criticalMetric.totalDescendantsCount} ramos.`}
+                  >
+                    🔥 Crítico
+                  </span>
+                )}
+                {!criticalMetric?.isCriticalBottleneck &&
+                  criticalMetric &&
+                  criticalMetric.criticalPathLength >= 3 &&
+                  criticalMetric.totalDescendantsCount >= 3 &&
+                  status !== "APPROVED" && (
+                    <span
+                      className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[9px] font-extrabold bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/30"
+                      title={`Ramo clave para no atrasarse (desbloquea ${criticalMetric.totalDescendantsCount} ramos)`}
+                    >
+                      ⭐ Clave
+                    </span>
+                  )}
+
                 {/* Correlative ID */}
                 <span
                   className="inline-flex items-center justify-center h-4.5 min-w-4.5 px-1 rounded-full text-[9px] font-bold text-white shadow-xs"
@@ -143,7 +180,7 @@ export function CourseCard({
                       <MoreVertical className="h-3.5 w-3.5 text-muted-foreground" />
                     </button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-48 text-xs">
+                  <DropdownMenuContent align="end" className="w-52 text-xs">
                     <DropdownMenuItem onClick={() => onOpenDetail(course)}>
                       <Info className="mr-2 h-3.5 w-3.5" />
                       Ver detalles
@@ -175,19 +212,57 @@ export function CourseCard({
                     )}
 
                     {onNavigateToSolver && (
+                      <DropdownMenuItem
+                        onClick={() => {
+                          if (status !== "IN_PROGRESS") {
+                            enrollCourse(course.sigla);
+                          }
+                          onNavigateToSolver(course.sigla);
+                        }}
+                      >
+                        <PlayCircle className="mr-2 h-3.5 w-3.5 text-secondary" />
+                        Calcular en Solver
+                      </DropdownMenuItem>
+                    )}
+
+                    {/* Planning Mode Actions */}
+                    {isPlannedMode && onMoveCourse && (
                       <>
                         <DropdownMenuSeparator />
+                        <div className="px-2 py-1 text-[10px] font-bold text-muted-foreground uppercase flex items-center gap-1">
+                          <Calendar className="h-3 w-3 text-[#D99B00]" />
+                          Planificar Semestre
+                        </div>
+                        {currentSemester > 1 && (
+                          <DropdownMenuItem
+                            onClick={() => onMoveCourse(course.sigla, currentSemester - 1, false)}
+                          >
+                            <ArrowLeft className="mr-2 h-3.5 w-3.5 text-amber-600" />
+                            Mover a Semestre {currentSemester - 1}
+                          </DropdownMenuItem>
+                        )}
                         <DropdownMenuItem
-                          onClick={() => {
-                            if (status !== "IN_PROGRESS") {
-                              enrollCourse(course.sigla);
-                            }
-                            onNavigateToSolver(course.sigla);
-                          }}
+                          onClick={() => onMoveCourse(course.sigla, currentSemester + 1, false)}
                         >
-                          <PlayCircle className="mr-2 h-3.5 w-3.5 text-secondary" />
-                          Calcular en Solver
+                          <ArrowRight className="mr-2 h-3.5 w-3.5 text-amber-600" />
+                          Mover a Semestre {currentSemester + 1}
                         </DropdownMenuItem>
+
+                        <div className="p-1.5 flex flex-wrap gap-1 max-w-[200px] border-t border-border/50">
+                          {Array.from({ length: Math.min(totalPlannedSemesters + 1, 15) }, (_, i) => i + 1)
+                            .filter((s) => s !== currentSemester)
+                            .map((s) => (
+                              <button
+                                key={s}
+                                type="button"
+                                onClick={() => onMoveCourse(course.sigla, s, false)}
+                                className="px-1.5 py-0.5 text-[10px] rounded border bg-background hover:bg-muted font-mono"
+                                title={`Mover a Semestre ${s}`}
+                              >
+                                S{s}
+                              </button>
+                            ))}
+                        </div>
                       </>
                     )}
                   </DropdownMenuContent>
@@ -200,11 +275,35 @@ export function CourseCard({
               {course.nombre}
             </div>
 
-            {/* Bottom Row: Credits & Status Badges */}
+            {/* Bottom Row: Credits & Quick Planner Buttons & Status Badges */}
             <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1 border-t border-border/50">
               <span className="font-medium">
                 {course.creditos_usm}U | {course.creditos_sct}SCT
               </span>
+
+              {/* Quick shift buttons in planned mode */}
+              {isPlannedMode && onMoveCourse && (
+                <div className="flex items-center gap-0.5 opacity-60 group-hover:opacity-100 transition-opacity" data-no-card-click="true">
+                  {currentSemester > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => onMoveCourse(course.sigla, currentSemester - 1, false)}
+                      className="h-4.5 w-4.5 rounded bg-muted/80 hover:bg-muted flex items-center justify-center text-[10px] border"
+                      title={`Mover al Semestre ${currentSemester - 1}`}
+                    >
+                      <ArrowLeft className="h-2.5 w-2.5" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => onMoveCourse(course.sigla, currentSemester + 1, false)}
+                    className="h-4.5 w-4.5 rounded bg-muted/80 hover:bg-muted flex items-center justify-center text-[10px] border"
+                    title={`Mover al Semestre ${currentSemester + 1}`}
+                  >
+                    <ArrowRight className="h-2.5 w-2.5" />
+                  </button>
+                </div>
+              )}
 
               {status === "APPROVED" && (
                 <span className="font-bold text-emerald-600 dark:text-emerald-400">
@@ -242,6 +341,13 @@ export function CourseCard({
               {course.sigla}
             </span>
           </div>
+
+          {criticalMetric && status !== "APPROVED" && (
+            <div className="py-1 px-1.5 rounded bg-slate-800/80 text-[10px] text-amber-300 font-mono flex items-center justify-between">
+              <span>Camino Crítico: {criticalMetric.criticalPathLength} semestres</span>
+              <span>Desbloquea: {criticalMetric.totalDescendantsCount}</span>
+            </div>
+          )}
 
           {status === "LOCKED" && (
             <div className="text-destructive font-medium">

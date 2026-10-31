@@ -9,7 +9,15 @@ import {
   AcademicStatistics,
   CourseSolveResult,
   SubFormulaCourseSolveResult,
+  PlannerViewMode,
+  MoveCourseResult,
+  Course,
 } from '@/shared/types/academic';
+import {
+  planFastestGraduation,
+  GraduationPlanResult,
+  normalizeCourseSigla,
+} from '@/curricula/planner/criticalPathPlanner';
 import ici2014Data from '@/curricula/careers/ici-2014.json';
 import {
   createSmartCourseConfig,
@@ -40,10 +48,26 @@ export interface AcademicStoreState {
   inProgressCourses: Record<string, EnrolledCourseConfig>;
   milestones: GraduationMilestone[];
 
+  // Planner state
+  plannerMode: PlannerViewMode;
+  plannedSemesterOverrides: Record<string, number>;
+  maxCreditsPerSemester: number;
+  customMaxSemester: number;
+
   // Actions
   setSelectedCourse: (sigla: string | null) => void;
   selectCurriculumPlan: (planId: string) => Promise<void>;
   setSelectedParallel: (sigla: string, paralelo: string | undefined) => void;
+  setPlannerMode: (mode: PlannerViewMode) => void;
+  setMaxCreditsPerSemester: (credits: number) => void;
+  setCustomMaxSemester: (sem: number) => void;
+  movePlannedCourse: (
+    sigla: string,
+    targetSemester: number,
+    cascadePush?: boolean
+  ) => MoveCourseResult;
+  resetPlannedSemesters: () => void;
+  applyAutoCriticalPathPlan: (maxCreditsSct?: number) => GraduationPlanResult;
   toggleCourseApproval: (sigla: string, grade?: number) => void;
   toggleSemesterApproval: (semesterNumber: number) => void;
   setCourseGrade: (sigla: string, grade: number) => void;
@@ -110,6 +134,10 @@ export const useAcademicStore = create<AcademicStoreState>()(
       approvedCourses: {},
       inProgressCourses: {},
       milestones: DEFAULT_GRADUATION_MILESTONES,
+      plannerMode: 'official' as PlannerViewMode,
+      plannedSemesterOverrides: {},
+      maxCreditsPerSemester: 30,
+      customMaxSemester: 11,
 
       setSelectedCourse: (sigla: string | null) => {
         set({ selectedCourseSigla: sigla });
@@ -121,7 +149,200 @@ export const useAcademicStore = create<AcademicStoreState>()(
           activePlanId: planId,
           curriculum: plan,
           selectedCourseSigla: null,
+          customMaxSemester: Math.max(plan.semestres_totales || 11, get().customMaxSemester),
         });
+      },
+
+      setPlannerMode: (mode: PlannerViewMode) => {
+        set({ plannerMode: mode });
+      },
+
+      setMaxCreditsPerSemester: (credits: number) => {
+        const clamped = Math.max(10, Math.min(60, Number(credits) || 30));
+        set({ maxCreditsPerSemester: clamped });
+      },
+
+      setCustomMaxSemester: (sem: number) => {
+        const clamped = Math.max(1, Math.floor(sem));
+        set({ customMaxSemester: clamped });
+      },
+
+      movePlannedCourse: (
+        sigla: string,
+        targetSemester: number,
+        cascadePush: boolean = false
+      ): MoveCourseResult => {
+        const targetSem = Math.max(1, Math.floor(targetSemester));
+        const norm = normalizeCourseSigla(sigla);
+        const { curriculum, approvedCourses, plannedSemesterOverrides, customMaxSemester } = get();
+        const ramos = curriculum.ramos || [];
+
+        const targetCourse = ramos.find(
+          (r) => normalizeCourseSigla(r.sigla) === norm || r.sigla.toUpperCase() === norm
+        );
+
+        if (!targetCourse) {
+          return {
+            success: false,
+            reason: `No se encontró la asignatura con sigla ${sigla} en la malla activa.`,
+          };
+        }
+
+        const isApproved = (s: string) => {
+          const sNorm = normalizeCourseSigla(s);
+          return Object.keys(approvedCourses).some((k) => normalizeCourseSigla(k) === sNorm);
+        };
+
+        const getEffectiveSemester = (c: Course, overrides: Record<string, number>) => {
+          return (
+            overrides[c.sigla] ??
+            overrides[normalizeCourseSigla(c.sigla)] ??
+            c.semestre
+          );
+        };
+
+        // 1. REGLA INQUEBRANTABLE:
+        // Ningún ramo B puede planificarse en semestre <= al semestre de sus prerrequisitos no aprobados A.
+        for (const prereqSigla of targetCourse.prerrequisitos) {
+          if (isApproved(prereqSigla)) continue;
+
+          const prereqCourse = ramos.find(
+            (r) => normalizeCourseSigla(r.sigla) === normalizeCourseSigla(prereqSigla)
+          );
+          const prereqSem = prereqCourse
+            ? getEffectiveSemester(prereqCourse, plannedSemesterOverrides)
+            : 1;
+
+          if (targetSem <= prereqSem) {
+            const prereqName = prereqCourse
+              ? `${prereqCourse.nombre} (${prereqCourse.sigla})`
+              : prereqSigla;
+            return {
+              success: false,
+              reason: `No puedes mover ${targetCourse.nombre} (${targetCourse.sigla}) al Semestre ${targetSem} porque su prerrequisito ${prereqName} está planificado en el Semestre ${prereqSem}. La regla académica exige Semestre(${targetCourse.sigla}) > Semestre(${prereqSigla}).`,
+            };
+          }
+        }
+
+        // Evaluar cláusulas requisitos_dnf si existen
+        if (Array.isArray(targetCourse.requisitos_dnf) && targetCourse.requisitos_dnf.length > 0) {
+          const anyClauseMet = targetCourse.requisitos_dnf.some((clause) =>
+            clause.every((r) => {
+              if (isApproved(r.sigla)) return true;
+              const prereqCourse = ramos.find(
+                (c) => normalizeCourseSigla(c.sigla) === normalizeCourseSigla(r.sigla)
+              );
+              const prereqSem = prereqCourse
+                ? getEffectiveSemester(prereqCourse, plannedSemesterOverrides)
+                : 1;
+              return targetSem > prereqSem;
+            })
+          );
+          if (!anyClauseMet) {
+            return {
+              success: false,
+              reason: `No puedes mover ${targetCourse.nombre} (${targetCourse.sigla}) al Semestre ${targetSem} debido a restricciones de prerrequisitos disyuntivos (SIGA DNF).`,
+            };
+          }
+        }
+
+        // 2. Comprobar dependientes ya planificados:
+        // Si targetCourse se mueve hacia adelante a targetSem, cualquier ramo dependiente
+        // planificado en Semestre(dep) <= targetSem entra en conflicto.
+        const newOverrides: Record<string, number> = { ...plannedSemesterOverrides };
+        newOverrides[targetCourse.sigla] = targetSem;
+
+        const pushedList: string[] = [];
+        const queue: Array<{ sigla: string; minSem: number }> = [
+          { sigla: targetCourse.sigla, minSem: targetSem + 1 },
+        ];
+        const visited = new Set<string>();
+
+        while (queue.length > 0) {
+          const { sigla: currSigla, minSem } = queue.shift()!;
+          const currNorm = normalizeCourseSigla(currSigla);
+          if (visited.has(currNorm)) continue;
+          visited.add(currNorm);
+
+          for (const depCourse of ramos) {
+            if (isApproved(depCourse.sigla)) continue;
+
+            const dependsOnCurr =
+              depCourse.prerrequisitos.some(
+                (p) => normalizeCourseSigla(p) === currNorm
+              ) ||
+              (Array.isArray(depCourse.requisitos_dnf) &&
+                depCourse.requisitos_dnf.some((clause) =>
+                  clause.some((r) => normalizeCourseSigla(r.sigla) === currNorm)
+                ));
+
+            if (dependsOnCurr) {
+              const currentDepSem = getEffectiveSemester(depCourse, newOverrides);
+              if (currentDepSem < minSem) {
+                if (!cascadePush) {
+                  return {
+                    success: false,
+                    reason: `Mover ${targetCourse.sigla} al Semestre ${targetSem} entra en conflicto con su ramo dependiente ${depCourse.nombre} (${depCourse.sigla}), que está en el Semestre ${currentDepSem}. Activa el desplazamiento en cascada para moverlo automáticamente al Semestre ${minSem}.`,
+                  };
+                }
+                newOverrides[depCourse.sigla] = minSem;
+                pushedList.push(`${depCourse.sigla} ➔ Semestre ${minSem}`);
+                queue.push({ sigla: depCourse.sigla, minSem: minSem + 1 });
+              }
+            }
+          }
+        }
+
+        let maxSem = Math.max(customMaxSemester, targetSem);
+        for (const s of Object.values(newOverrides)) {
+          if (s > maxSem) maxSem = s;
+        }
+
+        set({
+          plannedSemesterOverrides: newOverrides,
+          customMaxSemester: maxSem,
+        });
+
+        return {
+          success: true,
+          pushedCourses: pushedList.length > 0 ? pushedList : undefined,
+        };
+      },
+
+      resetPlannedSemesters: () => {
+        const defaultTotal = get().curriculum.semestres_totales || 11;
+        set({
+          plannedSemesterOverrides: {},
+          customMaxSemester: defaultTotal,
+        });
+      },
+
+      applyAutoCriticalPathPlan: (maxCreditsSct?: number): GraduationPlanResult => {
+        const {
+          curriculum,
+          approvedCourses,
+          inProgressCourses,
+          maxCreditsPerSemester,
+          customMaxSemester,
+        } = get();
+        const credits = maxCreditsSct ?? maxCreditsPerSemester ?? 30;
+        const approvedSiglas = new Set(Object.keys(approvedCourses));
+        const inProgressSiglas = new Set(Object.keys(inProgressCourses));
+
+        const result = planFastestGraduation(
+          curriculum.ramos,
+          approvedSiglas,
+          inProgressSiglas,
+          credits
+        );
+
+        set({
+          plannedSemesterOverrides: result.plannedSemesterOverrides,
+          customMaxSemester: Math.max(customMaxSemester, result.totalSemesters),
+          plannerMode: 'planned',
+        });
+
+        return result;
       },
 
       setSelectedParallel: (sigla: string, paralelo: string | undefined) => {
@@ -485,6 +706,7 @@ export const useAcademicStore = create<AcademicStoreState>()(
         }
 
         const nextPlanId = res.data.activePlanId || get().activePlanId;
+        const defaultTotal = get().curriculum.semestres_totales || 11;
         set({
           activePlanId: nextPlanId,
           approvedCourses: res.data.approvedCourses,
@@ -493,6 +715,10 @@ export const useAcademicStore = create<AcademicStoreState>()(
             res.data.milestones.length > 0
               ? res.data.milestones
               : DEFAULT_GRADUATION_MILESTONES,
+          plannerMode: res.data.plannerMode || 'official',
+          plannedSemesterOverrides: res.data.plannedSemesterOverrides || {},
+          maxCreditsPerSemester: res.data.maxCreditsPerSemester || 30,
+          customMaxSemester: res.data.customMaxSemester || defaultTotal,
         });
 
         if (res.data.activePlanId && res.data.activePlanId !== get().curriculum.codigo_plan) {
@@ -515,10 +741,15 @@ export const useAcademicStore = create<AcademicStoreState>()(
           approvedCourses: get().approvedCourses,
           inProgressCourses: get().inProgressCourses,
           milestones: get().milestones,
+          plannerMode: get().plannerMode,
+          plannedSemesterOverrides: get().plannedSemesterOverrides,
+          maxCreditsPerSemester: get().maxCreditsPerSemester,
+          customMaxSemester: get().customMaxSemester,
         });
       },
 
       resetAll: () => {
+        const defaultTotal = get().curriculum.semestres_totales || 11;
         set({
           approvedCourses: {},
           inProgressCourses: {},
@@ -528,6 +759,10 @@ export const useAcademicStore = create<AcademicStoreState>()(
             completed: false,
             completedAt: undefined,
           })),
+          plannerMode: 'official',
+          plannedSemesterOverrides: {},
+          maxCreditsPerSemester: 30,
+          customMaxSemester: defaultTotal,
         });
       },
 
@@ -610,6 +845,10 @@ export const useAcademicStore = create<AcademicStoreState>()(
         inProgressCourses: state.inProgressCourses,
         milestones: state.milestones,
         selectedCourseSigla: state.selectedCourseSigla,
+        plannerMode: state.plannerMode,
+        plannedSemesterOverrides: state.plannedSemesterOverrides,
+        maxCreditsPerSemester: state.maxCreditsPerSemester,
+        customMaxSemester: state.customMaxSemester,
       }),
       onRehydrateStorage: () => (state) => {
         if (state && state.activePlanId && state.activePlanId !== '7313-2014') {
