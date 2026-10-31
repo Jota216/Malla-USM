@@ -13,7 +13,7 @@ Este proyecto es desarrollado y mantenido por:
 * **Joaquín D. Barrios** — GitHub: [@Jota216](https://github.com/Jota216)
 * **Jose Astudillo** — GitHub: [@jastudilloi](https://github.com/jastudilloi)
 
-🔗 **Acceso a la plataforma:** [https://jota216.github.io/Malla-USM/](https://jota216.github.io/Malla-USM/)
+🔗 **Acceso a la plataforma:** [https://meta55-dev.github.io/Malla-USM/](https://meta55-dev.github.io/Malla-USM/)
 
 ---
 
